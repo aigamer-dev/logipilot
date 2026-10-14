@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LogiPilot chat</title><meta name="description" content="LogiPilot: conversational multi-agent logistics exception handler.">
+<meta name="theme-color" content="#05060a">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/chat.css"></head>
+<body class="chatpage"><a class="skip" href="#log">Skip to conversation</a><canvas id="bg" aria-hidden="true"></canvas>
+<div class="app">
+<header class="nav"><div class="wrap"><a class="logo" href="index.html">Logi<b>Pilot</b></a>
+<ul id="health" class="health" aria-label="System health"></ul>
+<button id="newchat" class="btn sm" type="button">New conversation</button></div></header>
+<main id="log" class="log" tabindex="-1"><div class="wrap narrow">
+<div id="empty" class="empty"><h1 class="grad">What went wrong?</h1><p class="lead">Describe a shipment problem, or attach a photo, PDF, CSV or voice note.</p>
+<div class="prompts"><button type="button" class="card prompt">Where is LP1001? It was supposed to reach Mumbai yesterday.</button><button type="button" class="card prompt">My parcel LP1002 arrived crushed, the TV inside is cracked. I want a claim.</button><button type="button" class="card prompt">Customs is holding LP1004, what documents are missing?</button><button type="button" class="card prompt">We&#x27;re out of SKU-PHONE-01 in Bengaluru, can we replenish fast?</button><button type="button" class="card prompt">I was charged twice for LP1008, invoices INV-7781 and INV-7782.</button><button type="button" class="card prompt">LP1005 is lithium batteries and the box is leaking, please reroute it today.</button></div></div>
+<div id="msgs" aria-live="polite" aria-relevant="additions"></div></div></main>
+<footer class="composer"><div class="wrap narrow">
+<ul id="chips" class="chips" aria-label="Attachments"></ul>
+<form id="form" class="box"><label class="sr" for="msg">Message</label>
+<button type="button" id="attach" class="icon" aria-label="Attach files">📎</button>
+<input id="file" type="file" hidden multiple accept="image/*,application/pdf,.pdf,.csv,text/csv,audio/*">
+<textarea id="msg" rows="1" placeholder="Describe the exception…" aria-describedby="hint"></textarea>
+<button type="button" id="mic" class="icon" aria-label="Record voice note" aria-pressed="false">🎙️</button>
+<button type="submit" id="send" class="btn primary sm">Send</button></form>
+<p id="hint" class="sr">Enter sends, Shift+Enter adds a new line.</p><p id="micstat" class="micstat" role="status"></p></div></footer></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="js/bg.js"></script><script src="js/chat.js"></script></body></html>

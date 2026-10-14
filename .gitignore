@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.adk/
+.ruff_cache/
+.pytest_cache/
+# Internal working notes stay out of git.
+docs/
+plans/
+memory/
+.remember/
+rules.md
+decisions.md
+CLAUDE.md

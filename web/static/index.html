@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LogiPilot: logistics exceptions, resolved</title><meta name="description" content="LogiPilot: conversational multi-agent logistics exception handler.">
+<meta name="theme-color" content="#05060a">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css"></head>
+<body><a class="skip" href="#main">Skip to content</a><canvas id="bg" aria-hidden="true"></canvas>
+<header class="nav"><div class="wrap"><a class="logo" href="index.html">Logi<b>Pilot</b></a>
+<nav aria-label="Primary"><ul><li><a href="#problem">Problem</a></li><li><a href="#how">How it works</a></li><li><a href="#agents">Specialists</a></li><li><a href="#safety">Safety</a></li></ul></nav>
+<a class="btn primary" href="chat.html">Try here</a></div></header>
+<main id="main">
+<section class="hero"><div class="wrap rv"><span class="eyebrow">Agent Wars · multi-agent logistics</span>
+<h1><span class="grad">LogiPilot</span></h1>
+<p class="lead">Every logistics exception, from a photo, a voice note or a PDF, turned into verified action in seconds.</p>
+<div class="cta"><a class="btn primary" href="chat.html">Try here →</a><a class="btn" href="#how">How it works</a></div></div></section>
+<div class="marquee" aria-hidden="true"><div class="track"><span>Delay tracking</span><span>Damage claims</span><span>Lost parcels</span><span>Returns</span><span>Customs holds</span><span>Inventory replenishment</span><span>Address fixes</span><span>Billing disputes</span><span>PII vault</span><span>Typed verification</span><span>Hard-stop safety</span><span>Self-healing</span><span>Feedback loop</span><span>Delay tracking</span><span>Damage claims</span><span>Lost parcels</span><span>Returns</span><span>Customs holds</span><span>Inventory replenishment</span><span>Address fixes</span><span>Billing disputes</span><span>PII vault</span><span>Typed verification</span><span>Hard-stop safety</span><span>Self-healing</span><span>Feedback loop</span></div></div>
+<section id="problem"><div class="wrap"><h2 class="rv">Exceptions are <span class="grad">messy</span>.</h2><p class="sub rv">Logistics teams still stitch each one together by hand.</p>
+<div class="grid"><div class="card rv"><h3>Every format</h3><p>Photos of crushed boxes, voice notes, PDFs, CSVs and chat messages.</p></div>
+<div class="card rv"><h3>Every playbook</h3><p>Delay, damage, loss, customs, billing: each has its own rules and tools.</p></div>
+<div class="card rv"><h3>Every time by hand</h3><p>Someone reads, decides, looks things up and types the answer, again and again.</p></div></div></div></section>
+<section id="how"><div class="wrap"><h2 class="rv">How it <span class="grad">works</span></h2><p class="sub rv">Seven steps between your message and a verified answer.</p>
+<ol class="steps"><li class="card rv"><h3>Guardrails & PII vault</h3><p>Inputs are screened and personal data is swapped for vault tokens.</p></li><li class="card rv"><h3>Decomposer</h3><p>One message is split into independent, typed task fragments.</p></li><li class="card rv"><h3>Jev typed gate</h3><p>Each fragment becomes a typed contract before any agent runs.</p></li><li class="card rv"><h3>Hard-stop gate</h3><p>Dangerous or out-of-policy requests are stopped or sent to a human.</p></li><li class="card rv"><h3>Specialist agents over MCP</h3><p>Eight specialists call real tools through the Model Context Protocol.</p></li><li class="card rv"><h3>Jev verifier</h3><p>Every result is checked for resolution, grounding and policy.</p></li><li class="card rv"><h3>Persist & learn</h3><p>Outcomes and your feedback are stored to improve the next run.</p></li></ol></div></section>
+<section id="agents"><div class="wrap"><h2 class="rv">Eight <span class="grad">specialists</span></h2><p class="sub rv">Each one owns a playbook and its tools.</p>
+<div class="grid"><article class="card rv"><span class="ico" aria-hidden="true">⏱️</span><h3>Delay</h3><p>Locates the shipment, explains the slip and proposes a new ETA.</p></article><article class="card rv"><span class="ico" aria-hidden="true">📦</span><h3>Damage</h3><p>Assesses photos and notes, then opens a claim.</p></article><article class="card rv"><span class="ico" aria-hidden="true">🔍</span><h3>Lost</h3><p>Starts a trace and decides between search and reship.</p></article><article class="card rv"><span class="ico" aria-hidden="true">↩️</span><h3>Returns</h3><p>Authorises returns and generates labels.</p></article><article class="card rv"><span class="ico" aria-hidden="true">🛃</span><h3>Customs</h3><p>Finds missing documents behind a customs hold.</p></article><article class="card rv"><span class="ico" aria-hidden="true">🏭</span><h3>Inventory</h3><p>Checks stock and triggers fast replenishment.</p></article><article class="card rv"><span class="ico" aria-hidden="true">📍</span><h3>Address</h3><p>Corrects delivery addresses and redirects in transit.</p></article><article class="card rv"><span class="ico" aria-hidden="true">🧾</span><h3>Billing</h3><p>Detects duplicate charges and raises adjustments.</p></article></div></div></section>
+<section aria-labelledby="bt"><div class="wrap"><h2 id="bt" class="rv">Built with</h2><div class="built rv"><span class="chip">Google ADK</span><span class="chip">Gemma 4 (Ollama)</span><span class="chip">TypeSafe Jev</span><span class="chip">Firestore</span><span class="chip">MCP</span><span class="chip">Cloud Run</span></div></div></section>
+<section id="safety"><div class="wrap"><h2 class="rv">Safe by <span class="grad">design</span></h2>
+<div class="grid"><div class="card rv"><h3>Hard stops</h3><p>Hazardous or policy-breaking requests are blocked or escalated to a person.</p></div>
+<div class="card rv"><h3>Self-healing</h3><p>When a component fails, LogiPilot recovers and shows you what happened.</p></div>
+<div class="card rv"><h3>Feedback loop</h3><p>Thumbs up or down on every answer is stored and fed back into learning.</p></div></div>
+<div class="cta rv" style="margin-top:56px"><a class="btn primary" href="chat.html">Try here →</a></div></div></section>
+</main>
+<footer><div class="wrap"><span>LogiPilot · built for Agent Wars</span><a href="https://github.com/aigamer-dev/logipilot" rel="noopener">GitHub</a></div></footer>
+<script src="js/bg.js"></script></body></html>
