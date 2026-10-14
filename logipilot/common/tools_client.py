@@ -8,7 +8,7 @@ import httpx
 async def _call(method: str, path: str, **kwargs) -> dict:
     """Call the tools API; return {"error": ...} on 4xx and raise on 5xx or connection errors."""
     headers = {"X-API-Key": os.environ["TOOLS_API_KEY"]} if os.getenv("TOOLS_API_KEY") else {}
-    base = os.getenv("TOOLS_API_URL", "http://localhost:8080")
+    base = os.getenv("TOOLS_API_URL", "http://localhost:8090")
     async with httpx.AsyncClient(base_url=base, headers=headers, timeout=15) as client:
         resp = await client.request(method, path, **kwargs)
     if resp.status_code >= 500:

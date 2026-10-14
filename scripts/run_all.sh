@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Starts the three services: tools API (8080), MCP server (8081), web app + agents ($PORT, default 8000).
+# Starts the three services: tools API (8090), MCP server (8091), web app + agents ($PORT, default 8000).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONNOUSERSITE=1
+# Hosts without gcloud (e.g. Hugging Face Spaces) pass the Firestore service-account key as a secret.
+if [ -n "${GCP_SA_KEY_JSON:-}" ]; then
+  umask 077 && printf '%s' "$GCP_SA_KEY_JSON" > /tmp/gcp-sa.json
+  export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa.json
+fi
 PY="${PYTHON:-python}"
-export TOOLS_API_URL="${TOOLS_API_URL:-http://localhost:8080}"
-export MCP_URL="${MCP_URL:-http://localhost:8081/mcp}"
-"$PY" -m uvicorn logipilot.tools_api.main:app --host 0.0.0.0 --port 8080 --log-level warning &
-PORT=8081 "$PY" -m logipilot.mcp_server.main &
-for _ in $(seq 1 30); do curl -sf localhost:8080/health >/dev/null && break; sleep 1; done
+export TOOLS_API_URL="${TOOLS_API_URL:-http://localhost:8090}"
+export MCP_URL="${MCP_URL:-http://localhost:8091/mcp}"
+"$PY" -m uvicorn logipilot.tools_api.main:app --host 0.0.0.0 --port 8090 --log-level warning &
+PORT=8091 "$PY" -m logipilot.mcp_server.main &
+for _ in $(seq 1 30); do curl -sf localhost:8090/health >/dev/null && break; sleep 1; done
 exec "$PY" -m uvicorn logipilot.web.server:app --host 0.0.0.0 --port "${PORT:-8000}"

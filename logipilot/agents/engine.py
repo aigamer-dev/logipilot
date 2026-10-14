@@ -53,6 +53,7 @@ async def turn(session_id: str, message: str, files: list[tuple[str, str, bytes]
         if flags:
             envelope = {"answer": guardrails.REFUSAL, "status": "REFUSED", "contracts": []}
             pii_count = 0
+            tokenized_answer = envelope["answer"]
         else:
             parts, texts = [], []
             for name, mime, data in files:
@@ -85,7 +86,8 @@ async def turn(session_id: str, message: str, files: list[tuple[str, str, bytes]
                     envelope = delta["envelope"]
             if envelope is None:
                 raise RuntimeError("master produced no envelope")
-            envelope["answer"] = pii_vault.detokenize(envelope["answer"], vault)
+            tokenized_answer = envelope["answer"]
+            envelope["answer"] = pii_vault.detokenize(tokenized_answer, vault)
             trace = envelope.pop("trace", trace)
         envelope.update(
             session_id=session_id,
@@ -100,7 +102,12 @@ async def turn(session_id: str, message: str, files: list[tuple[str, str, bytes]
         await store.put_doc(
             "turns",
             turn_id,
-            {**envelope, "message": message if flags else "[tokenized]", "created_at": store.now()},
+            {
+                **envelope,
+                "answer": tokenized_answer,
+                "message": message if flags else "[tokenized]",
+                "created_at": store.now(),
+            },
         )
         for c in envelope["contracts"]:
             await store.put_doc(

@@ -12,8 +12,8 @@ OLLAMA_KEY = os.getenv("OLLAMA_KEY") or os.getenv("OLLAMA_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemma4:31b")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gpt-oss:20b")
 
-TOOLS_API_URL = os.getenv("TOOLS_API_URL", "http://localhost:8080")
-MCP_URL = os.getenv("MCP_URL", "http://localhost:8081/mcp")
+TOOLS_API_URL = os.getenv("TOOLS_API_URL", "http://localhost:8090")
+MCP_URL = os.getenv("MCP_URL", "http://localhost:8091/mcp")
 
 # Hard-stop criteria. Each one is a code check on a typed value, never a model opinion.
 MAX_ATTEMPTS = int(os.getenv("MAX_ATTEMPTS", "3"))

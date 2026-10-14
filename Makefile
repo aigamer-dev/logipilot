@@ -4,13 +4,13 @@ install:
 	uv pip install --python $(PY) -r pyproject.toml --group dev
 
 fmt:
-	$(PY) -m isort logipilot frontend tests scripts
-	$(PY) -m black logipilot frontend tests scripts
+	$(PY) -m isort logipilot tests scripts
+	$(PY) -m black logipilot tests scripts
 
 lint:
-	$(PY) -m ruff check logipilot frontend tests scripts
-	$(PY) -m isort --check-only logipilot frontend tests scripts
-	$(PY) -m black --check logipilot frontend tests scripts
+	$(PY) -m ruff check logipilot tests scripts
+	$(PY) -m isort --check-only logipilot tests scripts
+	$(PY) -m black --check logipilot tests scripts
 
 test:
 	$(PY) -m pytest -q

@@ -8,7 +8,7 @@ from starlette.responses import JSONResponse
 
 from logipilot.common.tools_client import TOOLS
 
-mcp = FastMCP("logipilot-tools", host="0.0.0.0", port=int(os.getenv("PORT", "8081")))
+mcp = FastMCP("logipilot-tools", host="0.0.0.0", port=int(os.getenv("PORT", "8091")))
 
 # Register the client functions directly so names, signatures and docstrings stay identical.
 for _tool in TOOLS:

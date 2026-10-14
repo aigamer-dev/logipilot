@@ -62,7 +62,8 @@ async def improve() -> dict:
             + "\n".join(notes[:15])
         )
         rule = proposal.get("rule", "").strip()
-        if not rule:
+        # No eval cases means no evidence either way, so the gate refuses to promote.
+        if not rule or not await store.list_docs("eval_cases", limit=1, category=category):
             continue
         baseline = await _eval_score(category, None)
         candidate = await _eval_score(category, rule)
