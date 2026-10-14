@@ -240,7 +240,8 @@ async def _probe(fn) -> dict:
 
 
 async def _http_ok(url: str) -> str:
-    async with httpx.AsyncClient(timeout=5) as client:
+    headers = {"X-API-Key": os.getenv("TOOLS_API_KEY", "")}
+    async with httpx.AsyncClient(timeout=5, headers=headers) as client:
         (await client.get(url)).raise_for_status()
     return "reachable"
 
