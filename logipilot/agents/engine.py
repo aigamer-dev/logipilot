@@ -6,6 +6,7 @@ guardrails -> PII vault -> attachments to parts -> ADK Runner(master) -> detoken
 import asyncio
 import collections
 import io
+import re
 import time
 import uuid
 
@@ -28,6 +29,14 @@ runner = Runner(
 )
 
 MAX_TEXT_CHARS = 8000
+# "lp-1001", "LP 1001", "LP1OO1" (letter O for zero) -> "LP1001", before any model sees the text.
+TRACKING_ID = re.compile(r"\b[Ll]\s*[Pp][\s-]*([0-9Oo]{4})\b")
+
+
+def normalize_ids(text: str) -> str:
+    return TRACKING_ID.sub(lambda m: "LP" + m.group(1).replace("O", "0").replace("o", "0"), text)
+
+
 # One turn at a time per session: parallel turns would interleave one session's state.
 _locks: collections.defaultdict[str, asyncio.Lock] = collections.defaultdict(asyncio.Lock)
 
@@ -98,7 +107,7 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
                 parts.append(part)
             if text:
                 texts.append(text)
-        raw = "\n\n".join([message, *texts]).strip() or "(see attachment)"
+        raw = normalize_ids("\n\n".join([message, *texts]).strip()) or "(see attachment)"
         t0 = time.monotonic()
         # Attachment text is scanned too: instructions hidden in a CSV are still instructions.
         flags = guardrails.scan(raw)

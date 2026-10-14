@@ -1,8 +1,10 @@
 """Public web app: landing page, chat page and the chat REST API (FastAPI, same origin)."""
 
+import asyncio
 import contextlib
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -13,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from logipilot.agents import engine, improver
-from logipilot.common import config, jev, llm, store
+from logipilot.common import config, healing, jev, llm, store
 
 STATIC = Path(__file__).resolve().parents[2] / "web" / "static"
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -37,6 +39,7 @@ ALLOWED_EXTENSIONS = (
     ".m4a",
 )
 SESSION_ID = r"^[A-Za-z0-9_-]{8,64}$"
+TURN_TIMEOUT_S = float(os.getenv("TURN_TIMEOUT_S", "120"))
 
 # Single-process mode (small hosts): the tools API and MCP server are mounted in this app and
 # still reached over HTTP/MCP, so the agent path is identical to the three-service layout.
@@ -96,7 +99,28 @@ async def chat(
         if len(data) > MAX_FILE_BYTES:
             raise HTTPException(413, f"{f.filename} is larger than 8 MB.")
         uploads.append((f.filename or "file", f.content_type or "application/octet-stream", data))
-    return await engine.turn(session_id, message, uploads)
+    try:
+        return await asyncio.wait_for(engine.turn(session_id, message, uploads), TURN_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 - the chat must always get an answer, never a 500
+        timed_out = isinstance(exc, TimeoutError)
+        await healing.record("turn", exc, "returned a safe FAILED answer to the user")
+        return {
+            "session_id": session_id,
+            "turn_id": f"failed-{uuid.uuid4().hex[:12]}",
+            "answer": (
+                "That took longer than it should, so I stopped to avoid a half-finished action. "
+                "Please send it again."
+                if timed_out
+                else "Something went wrong on my side and nothing was changed. Please try again."
+            ),
+            "status": "FAILED",
+            "contracts": [],
+            "trace": [],
+            "incidents": [{"component": "turn", "recovery": "safe FAILED answer"}],
+            "guardrail_flags": [],
+            "pii_vaulted": 0,
+            "latency_ms": 0,
+        }
 
 
 class Feedback(BaseModel):

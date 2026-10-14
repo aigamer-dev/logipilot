@@ -73,3 +73,14 @@ def test_skill_registry_is_complete_and_tools_are_known() -> None:
         assert set(skill.tools) <= ALLOWED_TOOLS, skill.name
         assert skill.playbook.startswith("#"), skill.name
     assert skills["general"].tools == ()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("where is lp-1001?", "where is LP1001?"), ("LP 1012 late", "LP1012 late"),
+     ("track LP1OO1", "track LP1001"), ("SKU-PHONE-01", "SKU-PHONE-01")],
+)  # fmt: skip
+def test_tracking_id_normalization(text: str, expected: str) -> None:
+    from logipilot.agents.engine import normalize_ids
+
+    assert normalize_ids(text) == expected
