@@ -1,4 +1,4 @@
-"""Unit tests for the deterministic core: contract lifecycle, guardrails, PII vault, skill registry."""
+"""Unit tests for the deterministic core: contracts, guardrails, PII vault, skills, ids."""
 
 import pytest
 
@@ -15,8 +15,13 @@ ALLOWED_TOOLS = {
 
 def test_contract_happy_path_and_illegal_jump() -> None:
     c = Contract(fragment="LP1002 arrived crushed")
-    for status, by in [("ACCEPTED", "master"), ("EXECUTING", "specialist"),
-                       ("DRAFTED", "specialist"), ("VERIFIED", "verifier"), ("RELEASED", "master")]:  # fmt: skip
+    for status, by in [
+        ("ACCEPTED", "master"),
+        ("EXECUTING", "specialist"),
+        ("DRAFTED", "specialist"),
+        ("VERIFIED", "verifier"),
+        ("RELEASED", "master"),
+    ]:
         c.advance(status, by)
     assert [h["to"] for h in c.history][-1] == "RELEASED"
     with pytest.raises(IllegalTransition):
@@ -84,3 +89,15 @@ def test_tracking_id_normalization(text: str, expected: str) -> None:
     from logipilot.agents.engine import normalize_ids
 
     assert normalize_ids(text) == expected
+
+
+def test_ticket_ids_are_unambiguous_and_detected() -> None:
+    from logipilot.agents import tickets
+
+    assert tickets.TICKET_ID.search("status of tkt-ab3k9q2m please")
+    assert not set("01IO") & set(tickets._ALPHABET)
+    open_ticket = {"ticket_id": "TKT-AB3K9Q2M", "status": "open", "category": "damage",
+                   "reason": "hazardous materials involved"}  # fmt: skip
+    assert "open" in tickets.status_answer(open_ticket)
+    answered = {**open_ticket, "status": "answered", "human_reply": "Courier collects it at 4pm."}
+    assert "Courier collects it at 4pm." in tickets.status_answer(answered)

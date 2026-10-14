@@ -39,5 +39,9 @@ select = ["E", "F", "W", "B", "UP", "SIM"]
 # B008: FastAPI declares params via call defaults. SIM105: explicit try/except reads clearer here.
 ignore = ["B008", "SIM105"]
 
+[tool.ruff.lint.per-file-ignores]
+# Prompt text is kept verbatim; wrapping it would change what the model reads.
+"logipilot/agents/specialists.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

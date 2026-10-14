@@ -19,6 +19,7 @@ from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event, EventActions
 from google.genai import types
 
+from logipilot.agents import tickets
 from logipilot.agents.contracts import Contract
 from logipilot.agents.skills import registry
 from logipilot.agents.specialists import build_agents
@@ -58,7 +59,7 @@ class MasterOrchestrator(BaseAgent):
         # 1. Decompose the message into intents.
         t0 = time.monotonic()
         intents = []
-        async for event, ok in self._run("decomposer", ctx):
+        async for event, _ok in self._run("decomposer", ctx):
             if event:
                 yield event
         try:
@@ -235,7 +236,7 @@ class MasterOrchestrator(BaseAgent):
                 if event:
                     yield event
             contract.answer = state.get("draft") or "I've passed this to our operations team."
-            await store.add_doc("escalations", contract.model_dump())
+            await self._open_ticket(ctx, contract)
             return
 
         state["clarifications"] = 0
@@ -249,7 +250,9 @@ class MasterOrchestrator(BaseAgent):
             contract.advance("EXECUTING", "specialist", f"attempt {contract.attempts}")
             t0 = time.monotonic()
             ok = False
-            async for event, ok in self._run(contract.category, ctx):
+            async for event, ok in self._run(
+                contract.category, ctx
+            ):  # noqa: B007 - the last value is read after the loop
                 if event:
                     for resp in event.get_function_responses() or []:
                         evidence.append(json.dumps(resp.response, default=str)[:3000])
@@ -294,9 +297,19 @@ class MasterOrchestrator(BaseAgent):
                 contract.answer += (
                     "\n\n_I've also asked a human teammate to double-check this for you._"
                 )
-                await store.add_doc("escalations", contract.model_dump())
+                await self._open_ticket(ctx, contract)
                 return
             state["critique"] = contract.verification["critique"]
+
+    async def _open_ticket(self, ctx: InvocationContext, contract: Contract) -> None:
+        """Every hand-off gets a ticket the customer can follow up on."""
+        contract.ticket_id = await tickets.create(
+            ctx.session.id, contract.model_dump(), contract.escalation_reason
+        )
+        contract.answer += (
+            f'\n\n**Ticket ID: {contract.ticket_id}**. Ask me "status of {contract.ticket_id}" '
+            "anytime to see whether our team has replied."
+        )
 
     async def _verify(self, contract: Contract, evidence: list[str]) -> dict:
         answers = await jev.ask(

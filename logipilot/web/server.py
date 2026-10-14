@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from logipilot.agents import engine, improver
+from logipilot.agents import engine, improver, tickets
 from logipilot.common import config, healing, jev, llm, store
 
 STATIC = Path(__file__).resolve().parents[2] / "web" / "static"
@@ -137,12 +137,53 @@ async def feedback(body: Feedback) -> dict:
     return {"ok": True}
 
 
+class TicketReply(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    close: bool = False
+
+
+def _require_admin(token: str) -> None:
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected or token != expected:
+        raise HTTPException(403, "Admin token required.")
+
+
+@app.get("/api/tickets/{ticket_id}")
+async def ticket_status(ticket_id: str, session_id: str) -> dict:
+    """A customer checks their own ticket (only from the session that opened it)."""
+    ticket = await tickets.get(ticket_id, session_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found for this session.")
+    return {
+        k: ticket.get(k)
+        for k in (
+            "ticket_id",
+            "status",
+            "category",
+            "reason",
+            "human_reply",
+            "created_at",
+            "updated_at",
+        )
+    }
+
+
+@app.post("/api/tickets/{ticket_id}/reply")
+async def ticket_reply(
+    ticket_id: str, body: TicketReply, x_admin_token: str = Header(default="")
+) -> dict:
+    """Operations staff answer a ticket; the customer sees it on their next status check."""
+    _require_admin(x_admin_token)
+    ticket = await tickets.reply(ticket_id, body.message, body.close)
+    if not ticket:
+        raise HTTPException(404, "Unknown ticket.")
+    return {"ok": True, "ticket_id": ticket["ticket_id"], "status": ticket["status"]}
+
+
 @app.post("/api/improve")
 async def improve(x_admin_token: str = Header(default="")) -> dict:
     """Run one feedback-loop cycle. Admin only: it changes agent behaviour for everyone."""
-    expected = os.getenv("ADMIN_TOKEN", "")
-    if not expected or x_admin_token != expected:
-        raise HTTPException(403, "Admin token required.")
+    _require_admin(x_admin_token)
     return await improver.improve()
 
 

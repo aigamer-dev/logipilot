@@ -1,7 +1,7 @@
 """ADK agents: the decomposer, eight domain specialists, the concierge and the escalation drafter.
 
-Agents are built by `build_agents(model_name, via_mcp)` so the master can swap in a fallback model or
-direct REST tools at runtime (self-healing) without changing any agent's behaviour.
+Agents are built by `build_agents(model_name, via_mcp, read_only)` so the master can swap in a
+fallback model, direct REST tools or a read-only toolset at runtime (self-healing) without changing any agent's behaviour.
 """
 
 import functools

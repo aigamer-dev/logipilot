@@ -61,6 +61,7 @@ class Contract(BaseModel):
     actions: list[dict] = Field(default_factory=list)
     answer: str = ""
     escalation_reason: str = ""
+    ticket_id: str | None = None
 
     def advance(self, target: str, by: str, note: str = "") -> None:
         if target not in LEGAL[self.status]:

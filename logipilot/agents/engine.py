@@ -16,7 +16,7 @@ from google.genai import types
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
-from logipilot.agents import guardrails, pii_vault
+from logipilot.agents import guardrails, pii_vault, tickets
 from logipilot.agents.master import master_agent
 from logipilot.common import healing, jev, store
 
@@ -120,10 +120,26 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
                 "ms": int((time.monotonic() - t0) * 1000),
             }
         )
+        ticket_match = None if flags else tickets.TICKET_ID.search(message)
         if flags:
             envelope = {"answer": guardrails.REFUSAL, "status": "REFUSED", "contracts": []}
             pii_count = 0
             tokenized_answer = envelope["answer"]
+        elif ticket_match:
+            # Ticket follow-ups are answered from the ticket record, never by a model.
+            ticket = await tickets.get(ticket_match.group(0), session_id)
+            answer = (
+                tickets.status_answer(ticket)
+                if ticket
+                else f"I can't find ticket {ticket_match.group(0).upper()} in this conversation. "
+                "Tickets can only be checked from the chat that created them."
+            )
+            envelope = {"answer": answer, "status": "RELEASED", "contracts": []}
+            trace.append(
+                {"step": "ticket_lookup", "detail": "found" if ticket else "not found", "ms": 0}
+            )
+            pii_count = 0
+            tokenized_answer = answer
         else:
             t0 = time.monotonic()
             safe_text, pii_count = await pii_vault.tokenize(session_id, raw)
@@ -159,6 +175,7 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
             # Error text stays in Firestore `incidents`; users see what failed and how it healed.
             incidents=[{"component": i["component"], "recovery": i["recovery"]} for i in incidents],
             guardrail_flags=flags,
+            tickets=[c["ticket_id"] for c in envelope["contracts"] if c.get("ticket_id")],
             pii_vaulted=pii_count,
             latency_ms=int((time.monotonic() - started) * 1000),
         )

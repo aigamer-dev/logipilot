@@ -11,7 +11,7 @@ from logipilot.common import config, llm, store
 
 
 async def _eval_score(category: str, extra_rule: str | None) -> float:
-    """Mean verifier score of this category's eval cases, optionally with a candidate rule active."""
+    """Mean verifier score of a category's eval cases, optionally with a candidate rule."""
     cases = await store.list_docs("eval_cases", category=category)
     if not cases:
         return 0.0

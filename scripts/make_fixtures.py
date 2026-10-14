@@ -1,4 +1,4 @@
-"""Regenerates the test fixtures in tests/fixtures/ and the downloadable copies in web/static/samples/.
+"""Regenerates tests/fixtures/ and the downloadable copies in web/static/samples/.
 
     python -m scripts.make_fixtures
 
