@@ -101,3 +101,34 @@ def test_ticket_ids_are_unambiguous_and_detected() -> None:
     assert "open" in tickets.status_answer(open_ticket)
     answered = {**open_ticket, "status": "answered", "human_reply": "Courier collects it at 4pm."}
     assert "Courier collects it at 4pm." in tickets.status_answer(answered)
+
+
+def test_customer_pii_from_db_is_vaulted_before_the_model_sees_it(monkeypatch) -> None:
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from logipilot.agents import specialists
+
+    async def no_persist(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(specialists.store, "put_doc", no_persist)
+    ctx = SimpleNamespace(
+        state={"pii_vault": {}},
+        _invocation_context=SimpleNamespace(session=SimpleNamespace(id="test-session-1")),
+    )
+    record = {
+        "tracking_id": "LP1002",
+        "customer": {"name": "Rohan Mehta", "email": "rohan@example.com", "phone": "+91 98765 08829",
+                     "address": "12 MG Road, Bengaluru"},
+        "carrier": "BlueDart",
+    }  # fmt: skip
+    # MCP wraps results as JSON text inside a content block; both shapes must be scrubbed.
+    for response in (record, {"content": [{"type": "text", "text": json.dumps(record)}]}):
+        cleaned = asyncio.run(specialists._after_tool(None, {}, ctx, response))
+        dumped = json.dumps(cleaned)
+        for secret in ("Rohan Mehta", "rohan@example.com", "98765", "MG Road"):
+            assert secret not in dumped
+        assert "BlueDart" in dumped and "[CUST_EMAIL_1]" in dumped
+    assert ctx.state["pii_vault"]["[CUST_EMAIL_1]"] == "rohan@example.com"

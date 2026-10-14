@@ -187,7 +187,8 @@ IDEMPOTENCY_KEYS = {
     "customs_docs": ["tracking_id"],
     "billing_dispute": ["reference_id"],
     "replenishment": ["sku", "warehouse"],
-    "notify": ["recipient", "message"],
+    # One notification per recipient per day, however the message is worded (no spam on retries).
+    "notify": ["recipient", "_day"],
 }
 
 
@@ -203,7 +204,8 @@ async def _record(kind: str, body: BaseModel, event_note: str | None = None) -> 
         await _need("inventory", fields["sku"], "SKU")
     # Idempotency: the same action on the same object returns the existing record, never a copy.
     key_fields = IDEMPOTENCY_KEYS.get(kind, sorted(fields))
-    key = "|".join([kind, *(str(fields.get(f, "")).upper() for f in key_fields)])
+    keyed = {**fields, "_day": now()[:10]}
+    key = "|".join([kind, *(str(keyed.get(f, "")).upper() for f in key_fields)])
     action_id = hashlib.sha1(key.encode()).hexdigest()[:20]
     existing = await get_doc("actions", action_id)
     if existing:

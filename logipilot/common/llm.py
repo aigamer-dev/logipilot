@@ -18,6 +18,7 @@ def adk_model(name: str | None = None) -> LiteLlm:
         api_base=config.OLLAMA_API_BASE,
         api_key=config.OLLAMA_KEY,
         temperature=0,
+        num_retries=2,  # rate limits under load are retried before the model fallback kicks in
     )
 
 
@@ -30,6 +31,7 @@ async def complete_json(prompt: str, model: str | None = None) -> dict:
         temperature=0,
         messages=[{"role": "user", "content": prompt}],
         timeout=30,
+        num_retries=2,
     )
     return parse_json(resp.choices[0].message.content or "")
 

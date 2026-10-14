@@ -16,6 +16,17 @@ _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I, so ids survive 
 
 
 async def create(session_id: str, contract: dict, reason: str) -> str:
+    # The same issue escalated again in one conversation reuses its open ticket.
+    for existing in await store.list_docs("tickets", limit=50, session_id=session_id):
+        same_ids = sorted(existing.get("tracking_ids") or []) == sorted(
+            contract.get("tracking_ids") or []
+        )
+        if (
+            existing.get("status") == "open"
+            and same_ids
+            and (existing.get("category") == contract.get("category"))
+        ):
+            return existing["ticket_id"]
     ticket_id = "TKT-" + "".join(secrets.choice(_ALPHABET) for _ in range(8))
     await store.put_doc(
         "tickets",
@@ -46,6 +57,8 @@ async def reply(ticket_id: str, message: str, close: bool) -> dict | None:
     ticket = await store.get_doc("tickets", ticket_id.upper())
     if not ticket:
         return None
+    if ticket["status"] == "closed":
+        raise ValueError("closed")
     update = {
         "human_reply": message,
         "status": "closed" if close else "answered",

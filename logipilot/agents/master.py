@@ -38,6 +38,14 @@ ID_PATTERNS = {
 }
 
 
+ACTION_CLAIM = re.compile(
+    r"\bI(?:'ve| have| just)?\s+(?:filed|opened|created|raised|submitted|requested|arranged|"
+    r"rerouted|initiated|scheduled|sent|notified|placed|updated|changed|booked)\b"
+    r"|\b(?:cancelled|canceled|withdrawn|refunded|reversed)\b",
+    re.I,
+)
+
+
 def _merge_ids(found: list[str], text: str, pattern: re.Pattern) -> list[str]:
     ids = [i.upper() for i in found] + [m.upper() for m in pattern.findall(text)]
     return list(dict.fromkeys(ids))
@@ -56,19 +64,21 @@ class MasterOrchestrator(BaseAgent):
                 {"step": name, "detail": detail, "ms": int((time.monotonic() - t0) * 1000)}
             )
 
-        # 1. Decompose the message into intents.
         t0 = time.monotonic()
-        intents = []
-        async for event, _ok in self._run("decomposer", ctx):
-            if event:
-                yield event
-        try:
-            intents = llm.parse_json(state.get("decomposition") or "")["intents"]
-        except (ValueError, KeyError, TypeError) as exc:
-            await healing.record("decomposer", exc, "treated the whole message as one intent")
+        intents: list[dict] = []
+
+        # 1. Decompose the message into intents.
         if not intents:
-            intents = [{"fragment": _user_text(ctx)}]
-        step("decomposer", f"{len(intents)} intent(s)", t0)
+            async for event, _ok in self._run("decomposer", ctx):
+                if event:
+                    yield event
+            try:
+                intents = llm.parse_json(state.get("decomposition") or "")["intents"]
+            except (ValueError, KeyError, TypeError) as exc:
+                await healing.record("decomposer", exc, "treated the whole message as one intent")
+            if not intents:
+                intents = [{"fragment": _user_text(ctx)}]
+            step("decomposer", f"{len(intents)} intent(s)", t0)
 
         # 2. Issue contracts and triage them with Jev in parallel.
         t0 = time.monotonic()
@@ -89,6 +99,7 @@ class MasterOrchestrator(BaseAgent):
                 claimed_value_usd=float(i.get("claimed_value_usd") or 0),
                 missing_info=i.get("missing_info") or "",
                 evidence=i.get("evidence") or "",
+                language=i.get("language") or "",
             )
             for i in intents
         ]
@@ -111,13 +122,17 @@ class MasterOrchestrator(BaseAgent):
             (s for s in ("ESCALATED", "NEEDS_INPUT", "FAILED", "REFUSED") if s in statuses),
             "RELEASED",
         )
+        yield self._final(ctx, state, trace, answer, overall, contracts)
+
+    def _final(self, ctx, state, trace, answer: str, status: str, contracts: list) -> Event:
+        """The one event that carries the turn's envelope and persists session-level state."""
         envelope = {
             "answer": answer,
-            "status": overall,
+            "status": status,
             "contracts": [c.model_dump() for c in contracts],
             "trace": trace,
         }
-        yield Event(
+        return Event(
             invocation_id=ctx.invocation_id,
             author=self.name,
             content=types.Content(role="model", parts=[types.Part(text=answer)]),
@@ -182,6 +197,10 @@ class MasterOrchestrator(BaseAgent):
             and contract.confidence < config.MIN_ROUTE_CONFIDENCE
             and not has_ids
         )
+        if missing and not unsure and contract.action_requested < 0.5:
+            # A general how-to question ("what is a commercial invoice?") needs no id.
+            contract.category = "general"
+            return "proceed", "general knowledge question, no id needed"
         if missing or unsure:
             if ctx.session.state.get("clarifications", 0) >= config.MAX_CLARIFICATIONS:
                 return "escalate", "too many clarifying questions without the needed details"
@@ -192,16 +211,26 @@ class MasterOrchestrator(BaseAgent):
             return "ask", f"missing {missing}"
         if contract.severity >= 2.5:
             return "escalate", "critical severity"
-        if contract.hazmat >= 0.7:
+        # Hazmat escalates when something must be done or is going wrong, not for an ETA question.
+        risky = contract.action_requested >= 0.5 or contract.severity >= 1.5
+        if contract.hazmat >= 0.7 and risky:
             return "escalate", "hazardous materials involved"
         records = await asyncio.gather(
             *(tools_client.lookup_shipment(t) for t in contract.tracking_ids),
             return_exceptions=True,
         )
+        unknown = [
+            t
+            for t, rec in zip(contract.tracking_ids, records, strict=True)
+            if isinstance(rec, dict) and "error" in rec
+        ]
+        if unknown:
+            contract.missing_info = f"a valid tracking id ({', '.join(unknown)} was not found)"
+            return "unknown_id", f"not found: {unknown}"
         for rec in records:
-            if not isinstance(rec, dict) or "error" in rec:
+            if not isinstance(rec, dict):
                 continue
-            if rec.get("hazmat"):
+            if rec.get("hazmat") and risky:
                 return "escalate", f"{rec['tracking_id']} is a hazmat shipment"
             value = max(float(rec.get("declared_value_usd") or 0), contract.claimed_value_usd)
             if contract.category in MONEY_SKILLS and value > config.HIGH_VALUE_USD:
@@ -218,6 +247,15 @@ class MasterOrchestrator(BaseAgent):
         decision, reason = await self._gate(ctx, contract)
         step("hard_stop_gate", f"{contract.category}: {decision} ({reason})", t0)
 
+        if decision == "unknown_id":
+            contract.advance("NEEDS_INPUT", "master", reason)
+            state["clarifications"] = state.get("clarifications", 0) + 1
+            contract.answer = (
+                f"I couldn't find {', '.join(reason.split('[')[1].strip(']').split(', '))} in our "
+                "system. Could you check the tracking id? It looks like LP followed by 4 digits, "
+                "for example LP1001."
+            ).replace("'", "")
+            return
         if decision == "ask":
             contract.advance("NEEDS_INPUT", "master", reason)
             state["clarifications"] = state.get("clarifications", 0) + 1
@@ -257,11 +295,6 @@ class MasterOrchestrator(BaseAgent):
                     for resp in event.get_function_responses() or []:
                         evidence.append(json.dumps(resp.response, default=str)[:3000])
                     yield event
-            if not ok:
-                contract.advance("FAILED", "master", "specialist failed after self-healing")
-                contract.answer = "Sorry, I couldn't complete that right now. Please try again."
-                return
-            contract.answer = state.get("draft") or ""
             for result in evidence:
                 for action_id in ACTION_ID.findall(result):
                     if all(a["action_id"] != action_id for a in contract.actions):
@@ -269,6 +302,18 @@ class MasterOrchestrator(BaseAgent):
                         contract.actions.append(
                             {"action_id": action_id, "kind": kind.group(1) if kind else "action"}
                         )
+            if not ok:
+                contract.advance("FAILED", "master", "specialist failed after self-healing")
+                done = ", ".join(f"{a['kind']} ({a['action_id']})" for a in contract.actions)
+                contract.answer = (
+                    f"I completed: {done}. I couldn't finish the rest of the reply; please ask "
+                    "again and I'll pick up from there."
+                    if done
+                    else "Sorry, I couldn't complete that right now and nothing was changed. "
+                    "Please try again."
+                )
+                return
+            contract.answer = state.get("draft") or ""
             contract.advance("DRAFTED", "specialist")
             if contract.category == "general":
                 # Small talk has nothing to ground or verify; release it directly.
@@ -290,6 +335,15 @@ class MasterOrchestrator(BaseAgent):
                 return
             contract.advance("REPAIRED", "verifier", contract.verification["critique"])
             out_of_time = time.monotonic() - started > config.TURN_DEADLINE_S
+            if (contract.attempts >= config.MAX_ATTEMPTS or out_of_time) and state.get("read_only"):
+                # Information-only answers change nothing; release the best effort with a caveat
+                # instead of spending a human's time.
+                contract.advance("RELEASED", "master", "best-effort read-only answer")
+                contract.answer += (
+                    '\n\n_If any of this looks off, say "talk to a person" and I\'ll open '
+                    "a ticket._"
+                )
+                return
             if contract.attempts >= config.MAX_ATTEMPTS or out_of_time:
                 reason = "time budget exhausted" if out_of_time else "verifier rejected 3 drafts"
                 contract.escalation_reason = reason
@@ -338,6 +392,10 @@ class MasterOrchestrator(BaseAgent):
             for k, floor in (("resolves", 0.6), ("grounded", 0.5), ("policy_ok", 0.7))
             if scores[k] < floor
         ]
+        # No tool can cancel or refund, so those claims are always invented.
+        phantom = re.search(r"\b(cancell?ed|withdrawn|refunded|reversed)\b", contract.answer, re.I)
+        if (ACTION_CLAIM.search(contract.answer) and not contract.actions) or phantom:
+            failed.append("phantom_action")
         critique = (
             "Fix these problems: "
             + ", ".join(
@@ -345,6 +403,8 @@ class MasterOrchestrator(BaseAgent):
                     "resolves": "the reply does not resolve the intent",
                     "grounded": "the reply states facts not found in tool results; look them up",
                     "policy_ok": "the reply breaks policy",
+                    "phantom_action": "the reply claims an action that no tool performed; "
+                    "describe only actions with an action id from the tool results",
                 }[k]
                 for k in failed
             )

@@ -38,6 +38,24 @@ REFUSAL = (
 )
 
 
+REFUSALS = {
+    "G6_UNLAWFUL_REQUEST": (
+        "I can't help with that: shipments have to be declared, labelled and valued accurately, "
+        "and records can't be deleted on request. I'm happy to help with a legitimate shipment, "
+        "customs paperwork, or a delivery problem."
+    ),
+    "OUT_OF_SCOPE": (
+        "That's outside what I can help with: I handle shipments, delays, damage, lost parcels, "
+        "returns, customs, stock and freight billing. If this is a medical or other emergency, "
+        "please contact your local emergency services."
+    ),
+}
+
+
+def refusal(flags: list[str]) -> str:
+    return next((REFUSALS[f] for f in flags if f in REFUSALS), REFUSAL)
+
+
 def scan(text: str) -> list[str]:
     """Return the names of every guardrail the text trips, in rule order."""
     return [name for name, pattern in RULES.items() if pattern.search(text or "")]

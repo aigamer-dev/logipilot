@@ -7,6 +7,7 @@
     DRAFTED      specialist   a resolution has been written
     VERIFIED     verifier     Jev confirmed it resolves, is grounded and is policy-safe
     REPAIRED     verifier     Jev rejected the draft; the critique goes back to the specialist
+                              (read-only answers may be released best-effort after 3 tries)
     RELEASED     master       answer returned to the user
     ESCALATED    master       a hard stop fired; a human gets a read-only briefing
     FAILED       master       unrecoverable error after self-healing
@@ -27,7 +28,7 @@ LEGAL: dict[str, set[str]] = {
     "ACCEPTED": {"EXECUTING", "FAILED"},
     "EXECUTING": {"DRAFTED", "FAILED", "ESCALATED"},
     "DRAFTED": {"VERIFIED", "REPAIRED", "FAILED"},
-    "REPAIRED": {"EXECUTING", "ESCALATED"},
+    "REPAIRED": {"EXECUTING", "ESCALATED", "RELEASED"},
     "VERIFIED": {"RELEASED"},
     "RELEASED": set(),
     "ESCALATED": set(),
@@ -54,6 +55,7 @@ class Contract(BaseModel):
     claimed_value_usd: float = 0.0
     missing_info: str = ""
     evidence: str = ""
+    language: str = ""
     status: str = "ISSUED"
     history: list[dict] = Field(default_factory=list)
     attempts: int = 0

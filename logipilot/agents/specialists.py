@@ -4,6 +4,7 @@ Agents are built by `build_agents(model_name, via_mcp, read_only)` so the master
 fallback model, direct REST tools or a read-only toolset at runtime (self-healing) without changing any agent's behaviour.
 """
 
+import datetime
 import functools
 import json
 
@@ -33,7 +34,8 @@ split it into independent intents, one per distinct problem or question.
 Return ONLY JSON: {"intents": [{"fragment": "<the part of the message this intent covers, rewritten
 to be self-contained using earlier conversation context>", "tracking_ids": ["LP1001"], "skus": [],
 "reference_ids": ["INV-1"], "claimed_value_usd": 0, "evidence": "<what attachments show, or ''>",
-"missing_info": "<the one detail needed to act that is still missing, or ''>"}]}
+"missing_info": "<the one detail needed to act that is still missing, or ''>",
+"language": "<language the user wrote in, e.g. English, Hindi, Tamil>"}]}
 Copy ids exactly. Never invent ids or amounts. Greetings or capability questions are one intent
 with no ids. Personal data appears as tokens like [EMAIL_1]; keep tokens as they are."""
 
@@ -61,10 +63,16 @@ async def _after_tool(tool, args: dict, tool_context, tool_response: dict) -> di
             vault[token], reverse[value] = value, token
         return reverse[value]
 
-    def walk(node):
+    def walk(node, in_customer: bool = False):
         if isinstance(node, dict):
+            # Every string under a "customer" object (name included) is vaulted, plus contact
+            # fields anywhere else.
             return {
-                k: token_for(k, v) if k in CUSTOMER_PII_FIELDS and isinstance(v, str) else walk(v)
+                k: (
+                    token_for(k, v)
+                    if isinstance(v, str) and (in_customer or k in CUSTOMER_PII_FIELDS)
+                    else walk(v, in_customer or k == "customer")
+                )
                 for k, v in node.items()
             }
         if isinstance(node, list):
@@ -109,6 +117,8 @@ def _specialist_instruction(category: str):
         return f"""{registry()[category].playbook}
 
 ## This turn
+TODAY: {datetime.date.today().isoformat()} (compare every date with today; never call a past date "upcoming")
+REPLY LANGUAGE: {contract.get("language") or "the language of the intent"}
 INTENT TO RESOLVE: {contract.get("fragment")}
 KNOWN IDS: tracking {contract.get("tracking_ids")}, skus {contract.get("skus")}, refs {contract.get("reference_ids")}
 EVIDENCE FROM ATTACHMENTS: {contract.get("evidence") or "none"}
@@ -121,7 +131,8 @@ VERIFIER CRITIQUE OF YOUR PREVIOUS ATTEMPT: {state.get("critique") or "none, fir
 Only use your tools; never invent data. {"READ-ONLY TURN: the customer only asked for information. Your only tools are lookups; skip every playbook step that takes an action and instead offer that action in one sentence." if state.get("read_only") else "Take only the actions the customer asked for or that the playbook requires for their request."}
 Contact details appear as tokens like [CUST_EMAIL_1]; pass them to notify_customer as-is and
 never write them in your reply. Your reply is sent verbatim to the customer: no narration of your
-process (never write things like "I have greeted the customer" or "No more outputs are needed")."""
+process (never write things like "I have greeted the customer" or "No more outputs are needed").
+Never address the customer by name, never sign the message, never mention internal ids or agents."""
 
     return build
 
@@ -160,9 +171,13 @@ def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dic
             instruction=lambda ctx: (
                 "This intent hit a hard-stop rule and goes to a human operator. Reason: "
                 f"{ctx.state.get('escalation_reason')}. Intent: "
-                f"{json.dumps(ctx.state.get('current_contract'))}. Look up the referenced records, "
-                "then reply to the customer: you've passed it to a specialist human team with a "
-                "full briefing, what they will check, and any safety advice. Promise nothing else."
+                f"{(ctx.state.get('current_contract') or {}).get('fragment')} (ids: "
+                f"{(ctx.state.get('current_contract') or {}).get('tracking_ids')}). Look up the "
+                "referenced records, then reply to the customer in their language: you've passed "
+                "it to a specialist human team with a full briefing, what they will check, and "
+                "any safety advice. Promise nothing else. If the request is unlawful or unsafe, "
+                "say plainly that you can't help with that part. Never sign the message, never "
+                "use the customer's name, never mention internal ids or agents."
             ),
             tools=_tools(ESCALATION_TOOLS, via_mcp),
             before_tool_callback=_before_tool,

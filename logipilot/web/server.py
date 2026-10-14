@@ -10,7 +10,9 @@ from typing import Literal
 
 import httpx
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -73,6 +75,21 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def friendly_validation_error(_, exc: RequestValidationError):
+    """Say which field is wrong without echoing the submitted input back."""
+    fields = sorted({str(e["loc"][-1]) for e in exc.errors()})
+    return JSONResponse(
+        {
+            "detail": f"Invalid input in: {', '.join(fields)}. Messages are limited to 4000 "
+            "characters; session ids are 8-64 letters, digits, '-' or '_'."
+        },
+        status_code=422,
+    )
+
+
 INTERNAL_PREFIXES = ("/tools", "/mcp-server")
 
 
@@ -86,8 +103,6 @@ async def internal_only(request, call_next):
     if request.url.path.startswith(INTERNAL_PREFIXES) and (
         request.client is None or request.client.host not in ("127.0.0.1", "::1")
     ):
-        from fastapi.responses import JSONResponse
-
         return JSONResponse({"detail": "Not Found"}, status_code=404)
     return await call_next(request)
 
@@ -193,7 +208,10 @@ async def ticket_reply(
 ) -> dict:
     """Operations staff answer a ticket; the customer sees it on their next status check."""
     _require_admin(x_admin_token)
-    ticket = await tickets.reply(ticket_id, body.message, body.close)
+    try:
+        ticket = await tickets.reply(ticket_id, body.message, body.close)
+    except ValueError:
+        raise HTTPException(409, "Ticket is closed; open a new one instead.") from None
     if not ticket:
         raise HTTPException(404, "Unknown ticket.")
     return {"ok": True, "ticket_id": ticket["ticket_id"], "status": ticket["status"]}
