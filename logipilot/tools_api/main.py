@@ -1,5 +1,6 @@
 """Logistics tools REST API backed by Firestore, with live weather from Open-Meteo."""
 
+import hashlib
 import os
 from typing import Literal
 
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from google.cloud import firestore
 from pydantic import BaseModel, Field
 
-from logipilot.common.store import add_doc, db, get_doc, list_docs, now
+from logipilot.common.store import db, get_doc, list_docs, now, put_doc
 
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 
@@ -178,6 +179,18 @@ class Notify(BaseModel):
     message: str
 
 
+# Fields that identify "the same action" for idempotency; free-text fields are excluded.
+IDEMPOTENCY_KEYS = {
+    "damage_claim": ["tracking_id"],
+    "return": ["tracking_id"],
+    "reroute": ["tracking_id", "new_destination"],
+    "customs_docs": ["tracking_id"],
+    "billing_dispute": ["reference_id"],
+    "replenishment": ["sku", "warehouse"],
+    "notify": ["recipient", "message"],
+}
+
+
 async def _record(kind: str, body: BaseModel, event_note: str | None = None) -> dict:
     """Validate references, store the action, and optionally append a shipment event."""
     fields = body.model_dump()
@@ -188,7 +201,16 @@ async def _record(kind: str, body: BaseModel, event_note: str | None = None) -> 
     if "sku" in fields:
         fields["sku"] = fields["sku"].upper()
         await _need("inventory", fields["sku"], "SKU")
-    action_id = await add_doc("actions", {"kind": kind, "status": "open", **fields})
+    # Idempotency: the same action on the same object returns the existing record, never a copy.
+    key_fields = IDEMPOTENCY_KEYS.get(kind, sorted(fields))
+    key = "|".join([kind, *(str(fields.get(f, "")).upper() for f in key_fields)])
+    action_id = hashlib.sha1(key.encode()).hexdigest()[:20]
+    existing = await get_doc("actions", action_id)
+    if existing:
+        return {"action_id": action_id, "duplicate": True, **existing}
+    await put_doc(
+        "actions", action_id, {"kind": kind, "status": "open", "created_at": now(), **fields}
+    )
     if event_note:
         event = {"at": now(), "hub": None, "status": kind, "note": event_note}
         await db.collection("shipments").document(tid).update(

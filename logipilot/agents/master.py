@@ -151,6 +151,11 @@ class MasterOrchestrator(BaseAgent):
                         "Critical: safety risk, medical or perishable goods at risk, or large loss",
                     ],
                 ),
+                "action_requested": jev.noul(
+                    "The customer explicitly asks for something to be done (file a claim, reroute, "
+                    "change address, return, dispute a charge, reorder stock, notify someone), "
+                    "not just for information or status"
+                ),
                 "hazmat": jev.noul(
                     "The goods involve hazardous materials such as lithium batteries, chemicals or "
                     "flammables, or there is a leak or spill"
@@ -162,6 +167,7 @@ class MasterOrchestrator(BaseAgent):
         contract.confidence = float(cat.get("confidence") or 0)
         contract.severity = float(answers["severity"].get("score") or 0)
         contract.hazmat = float(answers["hazmat"].get("noul") or 0)
+        contract.action_requested = float(answers["action_requested"].get("noul") or 0)
 
     async def _gate(self, ctx: InvocationContext, contract: Contract) -> tuple[str, str]:
         """Hard-stop gate. Returns (decision, reason), decision in proceed|ask|escalate."""
@@ -232,6 +238,8 @@ class MasterOrchestrator(BaseAgent):
             return
 
         state["clarifications"] = 0
+        # Write tools are bound only when the customer asked for an action (deterministic gate).
+        state["read_only"] = contract.action_requested < 0.5
         state["learned_rules"] = await store.active_rules(contract.category)
         contract.advance("ACCEPTED", "master", reason)
         evidence: list[str] = []  # accumulated across attempts so repairs stay grounded
@@ -258,6 +266,11 @@ class MasterOrchestrator(BaseAgent):
                             {"action_id": action_id, "kind": kind.group(1) if kind else "action"}
                         )
             contract.advance("DRAFTED", "specialist")
+            if contract.category == "general":
+                # Small talk has nothing to ground or verify; release it directly.
+                contract.advance("VERIFIED", "master", "no claims to verify")
+                contract.advance("RELEASED", "master")
+                return
             step(
                 f"{contract.category}_specialist",
                 f"attempt {contract.attempts}, " f"{len(evidence)} tool result(s)",
@@ -336,7 +349,7 @@ class MasterOrchestrator(BaseAgent):
             plans.append((config.LLM_MODEL, True))
         plans += [(config.LLM_MODEL, False), (config.LLM_FALLBACK_MODEL, False)]
         for model_name, via_mcp in plans:
-            agent = build_agents(model_name, via_mcp)[key]
+            agent = build_agents(model_name, via_mcp, bool(ctx.session.state.get("read_only")))[key]
             try:
                 async for event in agent.run_async(ctx):
                     yield event, True

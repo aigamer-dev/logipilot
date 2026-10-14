@@ -4,9 +4,10 @@ import contextlib
 import os
 import time
 from pathlib import Path
+from typing import Literal
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -17,6 +18,25 @@ from logipilot.common import config, jev, llm, store
 STATIC = Path(__file__).resolve().parents[2] / "web" / "static"
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_FILES = 5
+ALLOWED_EXTENSIONS = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".pdf",
+    ".csv",
+    ".txt",
+    ".json",
+    ".xlsx",
+    ".xlsm",
+    ".webm",
+    ".ogg",
+    ".mp3",
+    ".wav",
+    ".m4a",
+)
+SESSION_ID = r"^[A-Za-z0-9_-]{8,64}$"
 
 # Single-process mode (small hosts): the tools API and MCP server are mounted in this app and
 # still reached over HTTP/MCP, so the agent path is identical to the three-service layout.
@@ -34,7 +54,15 @@ async def lifespan(_: FastAPI):
         yield
 
 
-app = FastAPI(title="LogiPilot", version="1.0.0", lifespan=lifespan)
+# No public /docs or schema: the README documents the API.
+app = FastAPI(
+    title="LogiPilot",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 # The GitHub Pages frontend calls this API cross-origin; only listed origins are allowed.
 app.add_middleware(
     CORSMiddleware,
@@ -52,7 +80,7 @@ if SINGLE_PROCESS:
 
 @app.post("/api/chat")
 async def chat(
-    session_id: str = Form(..., min_length=8, max_length=64),
+    session_id: str = Form(..., pattern=SESSION_ID),
     message: str = Form("", max_length=4000),
     files: list[UploadFile] = File(default_factory=list),
 ) -> dict:
@@ -62,6 +90,8 @@ async def chat(
         raise HTTPException(413, f"At most {MAX_FILES} attachments per message.")
     uploads = []
     for f in files:
+        if not (f.filename or "").lower().endswith(ALLOWED_EXTENSIONS):
+            raise HTTPException(415, f"{f.filename}: unsupported file type.")
         data = await f.read()
         if len(data) > MAX_FILE_BYTES:
             raise HTTPException(413, f"{f.filename} is larger than 8 MB.")
@@ -71,7 +101,7 @@ async def chat(
 
 class Feedback(BaseModel):
     turn_id: str = Field(min_length=6, max_length=64)
-    rating: int = Field(ge=-1, le=1)
+    rating: Literal[-1, 1]
     comment: str | None = Field(default=None, max_length=1000)
 
 
@@ -84,8 +114,11 @@ async def feedback(body: Feedback) -> dict:
 
 
 @app.post("/api/improve")
-async def improve() -> dict:
-    """Run one feedback-loop cycle (also callable from Cloud Scheduler)."""
+async def improve(x_admin_token: str = Header(default="")) -> dict:
+    """Run one feedback-loop cycle. Admin only: it changes agent behaviour for everyone."""
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected or x_admin_token != expected:
+        raise HTTPException(403, "Admin token required.")
     return await improver.improve()
 
 
@@ -106,12 +139,12 @@ async def _http_ok(url: str) -> str:
 
 async def _jev_ok() -> str:
     await jev._call("ping", {"ok": jev.noul("This is a ping")})
-    return "jev-latest"
+    return "ok"
 
 
 async def _llm_ok() -> str:
     await llm.complete_json('Return {"ok": true}')
-    return config.LLM_MODEL
+    return "ok"
 
 
 async def _firestore_ok() -> str:

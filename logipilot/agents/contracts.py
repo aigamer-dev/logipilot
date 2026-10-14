@@ -47,7 +47,7 @@ class Contract(BaseModel):
     confidence: float = 0.0
     severity: float = 0.0
     hazmat: float = 0.0
-    enough_info: float = 0.0
+    action_requested: float = 0.0
     tracking_ids: list[str] = Field(default_factory=list)
     skus: list[str] = Field(default_factory=list)
     reference_ids: list[str] = Field(default_factory=list)

@@ -13,9 +13,18 @@ from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
 
 from logipilot.agents import pii_vault
 from logipilot.agents.skills import registry
-from logipilot.common import config, healing, llm, tools_client
+from logipilot.common import config, healing, llm, store, tools_client
 
 ESCALATION_TOOLS = ["lookup_shipment", "shipment_risk", "check_inventory"]
+# Tools that only read. A specialist gets write tools only when the customer asked for an action.
+READ_ONLY_TOOLS = {
+    "lookup_shipment",
+    "shipment_risk",
+    "hub_weather",
+    "check_inventory",
+    "find_alternate_carriers",
+}
+CUSTOMER_PII_FIELDS = {"email", "phone", "address"}
 
 DECOMPOSER_PROMPT = """You are the decomposer of a logistics control tower. Read the latest user
 message in the light of the whole conversation (including any attached images or documents) and
@@ -34,6 +43,45 @@ async def _before_tool(tool, args: dict, tool_context) -> None:
     vault = tool_context.state.get("pii_vault") or {}
     if vault:
         args.update(pii_vault.detokenize(args, vault))
+
+
+async def _after_tool(tool, args: dict, tool_context, tool_response: dict) -> dict:
+    """Vault customer contact details in tool results so the model (and the user) never see them.
+
+    The chat is unauthenticated, so a tracking id alone must not reveal who the customer is or how
+    to reach them. Tokens still work as notify_customer arguments via _before_tool.
+    """
+    vault = dict(tool_context.state.get("pii_vault") or {})
+    reverse = {v: k for k, v in vault.items()}
+
+    def token_for(field: str, value: str) -> str:
+        if value not in reverse:
+            kind = f"CUST_{field.upper()}"
+            token = f"[{kind}_{sum(k.startswith(f'[{kind}_') for k in vault) + 1}]"
+            vault[token], reverse[value] = value, token
+        return reverse[value]
+
+    def walk(node):
+        if isinstance(node, dict):
+            return {
+                k: token_for(k, v) if k in CUSTOMER_PII_FIELDS and isinstance(v, str) else walk(v)
+                for k, v in node.items()
+            }
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str) and node.lstrip().startswith("{"):
+            try:
+                return json.dumps(walk(json.loads(node)))
+            except ValueError:
+                return node
+        return node
+
+    cleaned = walk(tool_response)
+    if len(vault) != len(tool_context.state.get("pii_vault") or {}):
+        tool_context.state["pii_vault"] = vault
+        session_id = tool_context._invocation_context.session.id
+        await store.put_doc("pii_vault", session_id, {"tokens": vault, "updated_at": store.now()})
+    return cleaned
 
 
 async def _on_tool_error(tool, args: dict, tool_context, error: Exception) -> dict:
@@ -70,14 +118,16 @@ LEARNED RULES (promoted from past feedback; follow them):
 
 VERIFIER CRITIQUE OF YOUR PREVIOUS ATTEMPT: {state.get("critique") or "none, first attempt"}
 
-Only use your tools; never invent data. Use the customer's email from the shipment record for
-notify_customer. Keep PII tokens like [EMAIL_1] exactly as written."""
+Only use your tools; never invent data. {"You may only LOOK UP information this turn: the customer has not asked for any action, so answer their question and offer the actions you could take." if state.get("read_only") else "Take only the actions the customer asked for or that the playbook requires for their request."}
+Contact details appear as tokens like [CUST_EMAIL_1]; pass them to notify_customer as-is and
+never write them in your reply. Your reply is sent verbatim to the customer: no narration of your
+process (never write things like "I have greeted the customer" or "No more outputs are needed")."""
 
     return build
 
 
 @functools.cache
-def build_agents(model_name: str, via_mcp: bool) -> dict[str, LlmAgent]:
+def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dict[str, LlmAgent]:
     model = llm.adk_model(model_name)
     agents: dict[str, LlmAgent] = {
         "decomposer": LlmAgent(
@@ -114,6 +164,7 @@ def build_agents(model_name: str, via_mcp: bool) -> dict[str, LlmAgent]:
             ),
             tools=_tools(ESCALATION_TOOLS, via_mcp),
             before_tool_callback=_before_tool,
+            after_tool_callback=_after_tool,
             on_tool_error_callback=_on_tool_error,
             output_key="draft",
         ),
@@ -126,8 +177,11 @@ def build_agents(model_name: str, via_mcp: bool) -> dict[str, LlmAgent]:
             model=model,
             description=skill.description,
             instruction=_specialist_instruction(skill.name),
-            tools=_tools(list(skill.tools), via_mcp),
+            tools=_tools(
+                [t for t in skill.tools if not read_only or t in READ_ONLY_TOOLS], via_mcp
+            ),
             before_tool_callback=_before_tool,
+            after_tool_callback=_after_tool,
             on_tool_error_callback=_on_tool_error,
             output_key="draft",
         )
