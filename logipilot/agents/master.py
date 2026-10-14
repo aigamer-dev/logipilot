@@ -244,6 +244,19 @@ class MasterOrchestrator(BaseAgent):
         state["current_contract"] = contract.model_dump()
         state["critique"] = ""
         t0 = time.monotonic()
+        ticket_ref = tickets.TICKET_ID.search(contract.fragment)
+        if ticket_ref:
+            ticket = await tickets.get(ticket_ref.group(0), ctx.session.id)
+            contract.category = "general"
+            for status in ("ACCEPTED", "EXECUTING", "DRAFTED", "VERIFIED", "RELEASED"):
+                contract.advance(status, "master", "answered from the ticket record")
+            contract.answer = (
+                tickets.status_answer(ticket)
+                if ticket
+                else f"I can't find ticket {ticket_ref.group(0).upper()} in this conversation."
+            )
+            step("ticket_lookup", "found" if ticket else "not found", t0)
+            return
         decision, reason = await self._gate(ctx, contract)
         step("hard_stop_gate", f"{contract.category}: {decision} ({reason})", t0)
 
@@ -309,12 +322,18 @@ class MasterOrchestrator(BaseAgent):
                     f"I completed: {done}. I couldn't finish the rest of the reply; please ask "
                     "again and I'll pick up from there."
                     if done
-                    else "Sorry, I couldn't complete that right now and nothing was changed. "
-                    "Please try again."
+                    else "Sorry, I couldn't complete that right now and nothing was changed."
                 )
+                contract.escalation_reason = "system error after self-healing"
+                await self._open_ticket(ctx, contract)
                 return
             contract.answer = state.get("draft") or ""
             contract.advance("DRAFTED", "specialist")
+            if not contract.actions and contract.answer.rstrip().endswith("?"):
+                # The specialist needs something from the customer; that is a question, not a
+                # failed answer, so it neither loops the verifier nor opens a human ticket.
+                contract.advance("NEEDS_INPUT", "specialist", "asked the customer for details")
+                return
             if contract.category == "general":
                 # Small talk has nothing to ground or verify; release it directly.
                 contract.advance("VERIFIED", "master", "no claims to verify")

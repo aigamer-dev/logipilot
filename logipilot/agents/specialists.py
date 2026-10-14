@@ -7,6 +7,7 @@ fallback model, direct REST tools or a read-only toolset at runtime (self-healin
 import datetime
 import functools
 import json
+import os
 
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
@@ -102,7 +103,11 @@ def _tools(names: list[str], via_mcp: bool) -> list:
     if via_mcp:
         return [
             McpToolset(
-                connection_params=StreamableHTTPConnectionParams(url=config.MCP_URL, timeout=15),
+                connection_params=StreamableHTTPConnectionParams(
+                    url=config.MCP_URL,
+                    timeout=15,
+                    headers={"X-API-Key": os.getenv("TOOLS_API_KEY", "")},
+                ),
                 tool_filter=names,
             )
         ]
@@ -150,7 +155,18 @@ def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dic
         "general": LlmAgent(
             name="concierge",
             model=model,
-            instruction=registry()["general"].playbook,
+            include_contents="none",
+            instruction=lambda ctx: (
+                registry()["general"].playbook
+                + "\n\n## This turn\nTODAY: "
+                + datetime.date.today().isoformat()
+                + "\nREPLY LANGUAGE: "
+                + ((ctx.state.get("current_contract") or {}).get("language") or "the user's")
+                + "\nMESSAGE TO ANSWER: "
+                + str((ctx.state.get("current_contract") or {}).get("fragment"))
+                + "\nAnswer only this message. If it is unrelated to logistics, decline in one "
+                "friendly sentence and say what you can help with. Never sign the message."
+            ),
             output_key="draft",
         ),
         "clarifier": LlmAgent(

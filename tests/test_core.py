@@ -120,7 +120,8 @@ def test_customer_pii_from_db_is_vaulted_before_the_model_sees_it(monkeypatch) -
     )
     record = {
         "tracking_id": "LP1002",
-        "customer": {"name": "Rohan Mehta", "email": "rohan@example.com", "phone": "+91 98765 08829",
+        "customer": {"name": "Rohan Mehta", "email": "rohan@example.com",
+                     "phone": "+91 98765 08829",
                      "address": "12 MG Road, Bengaluru"},
         "carrier": "BlueDart",
     }  # fmt: skip

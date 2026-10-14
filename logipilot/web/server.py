@@ -101,7 +101,9 @@ async def internal_only(request, call_next):
     request that does not come from loopback gets a 404 as if they did not exist.
     """
     if request.url.path.startswith(INTERNAL_PREFIXES) and (
-        request.client is None or request.client.host not in ("127.0.0.1", "::1")
+        request.client is None
+        or request.client.host not in ("127.0.0.1", "::1")
+        or request.headers.get("x-api-key") != os.getenv("TOOLS_API_KEY")
     ):
         return JSONResponse({"detail": "Not Found"}, status_code=404)
     return await call_next(request)
@@ -159,13 +161,16 @@ async def chat(
 
 class Feedback(BaseModel):
     turn_id: str = Field(min_length=6, max_length=64)
+    session_id: str = Field(pattern=SESSION_ID)
     rating: Literal[-1, 1]
     comment: str | None = Field(default=None, max_length=1000)
 
 
 @app.post("/api/feedback")
 async def feedback(body: Feedback) -> dict:
-    if not await store.get_doc("turns", body.turn_id):
+    turn = await store.get_doc("turns", body.turn_id)
+    # Same 404 for "unknown" and "not yours", so turn ids can't be probed.
+    if not turn or turn.get("session_id") != body.session_id:
         raise HTTPException(404, "Unknown turn.")
     await store.put_doc("feedback", body.turn_id, {**body.model_dump(), "created_at": store.now()})
     return {"ok": True}
@@ -230,7 +235,8 @@ async def _probe(fn) -> dict:
         detail = await fn()
         return {"ok": True, "detail": f"{detail} ({int((time.monotonic() - t0) * 1000)} ms)"}
     except Exception as exc:  # noqa: BLE001 - health reports failures, it never raises them
-        return {"ok": False, "detail": str(exc)[:200]}
+        await healing.record("health", exc, "reported unavailable")
+        return {"ok": False, "detail": "unavailable"}  # details stay in Firestore incidents
 
 
 async def _http_ok(url: str) -> str:

@@ -15,7 +15,7 @@ Document the damage, file a correctly valued claim, and decide what happens to t
 2. Check evidence. A written description of the damage is enough to file. Photos (outer carton, label, item) strengthen the claim: if none are attached, file anyway and ask for them in your reply as supporting evidence.
 3. Claim value = min(declared_value_usd, amount claimed by the customer). If the customer gave no amount, use declared_value_usd for a total loss or ask for the repair/replacement cost for partial damage.
 4. `file_damage_claim` with tracking id, claim value, damage description and the evidence summary. Keep the returned claim id.
-5. Disposition via `create_return`: if the item is repairable or the customer wants a replacement and the goods are recoverable, create a return for inspection; if destroyed, wet, or unsafe (battery swelling, leaks), do not return it and mark for disposal on site.
+5. Disposition via `create_return` ONLY if the customer asks for a return, replacement or pickup and the goods are recoverable; otherwise offer it in one sentence. Never return destroyed, wet or unsafe goods (battery swelling, leaks).
 6. `notify_customer` with the claim id, any return id, and the expected review timeline.
 7. Hazmat damage (e.g. LP1005 lithium batteries): tell the customer not to handle or ship the goods further and escalate to a human operator; file the claim but do not create a return.
 

@@ -27,7 +27,7 @@ LEGAL: dict[str, set[str]] = {
     "NEEDS_INPUT": set(),
     "ACCEPTED": {"EXECUTING", "FAILED"},
     "EXECUTING": {"DRAFTED", "FAILED", "ESCALATED"},
-    "DRAFTED": {"VERIFIED", "REPAIRED", "FAILED"},
+    "DRAFTED": {"VERIFIED", "REPAIRED", "FAILED", "NEEDS_INPUT"},
     "REPAIRED": {"EXECUTING", "ESCALATED", "RELEASED"},
     "VERIFIED": {"RELEASED"},
     "RELEASED": set(),

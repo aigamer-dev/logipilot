@@ -1,6 +1,9 @@
 (()=>{
 const $=s=>document.querySelector(s);
-const mock=new URLSearchParams(location.search).has('mock');
+// No backend configured (static hosting such as GitHub Pages): run in labelled demo mode.
+const noBackend=window.LOGIPILOT_API===null;
+const mock=noBackend||new URLSearchParams(location.search).has('mock');
+if(noBackend)document.addEventListener('DOMContentLoaded',()=>{const b=document.createElement('div');b.className='demo-banner';b.setAttribute('role','status');b.innerHTML='<b>Demo mode:</b> this static copy has no live backend, so answers are canned examples. Run the full agent locally in five minutes: see the <a href="https://github.com/aigamer-dev/logipilot#14-quickstart">README quickstart</a>.';document.querySelector('main').prepend(b)});
 const store={get:k=>{try{return sessionStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{sessionStorage.setItem(k,v)}catch{}}};
 let sid=store.get('lp_sid');if(!sid){sid=crypto.randomUUID();store.set('lp_sid',sid)}
 let files=[],busy=false,rec=null;
@@ -79,7 +82,7 @@ function render(env){
  up.type=dn.type='button';up.setAttribute('aria-label','Helpful');dn.setAttribute('aria-label','Not helpful');up.setAttribute('aria-pressed','false');dn.setAttribute('aria-pressed','false');
  const cm=el('div','cm');cm.hidden=true;const ci=el('input');ci.type='text';ci.placeholder='What went wrong? (optional)';ci.setAttribute('aria-label','Feedback comment');
  const cs=el('button','btn sm','Submit');cs.type='button';cm.append(ci,cs);
- const fb=async(rating,comment)=>{try{if(!mock){const r=await fetch(window.LOGIPILOT_API+'/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turn_id:env.turn_id,rating,comment:comment||null})});if(!r.ok)throw 0}
+ const fb=async(rating,comment)=>{try{if(!mock){const r=await fetch(window.LOGIPILOT_API+'/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turn_id:env.turn_id,session_id:sid,rating,comment:comment||null})});if(!r.ok)throw 0}
   up.disabled=dn.disabled=true;cs.disabled=ci.disabled=true;meta.append(el('span','files','Thanks for the feedback.'))}catch{meta.append(el('span','files','Could not send feedback.'))}};
  up.onclick=()=>{up.setAttribute('aria-pressed','true');fb(1)};
  dn.onclick=()=>{dn.setAttribute('aria-pressed','true');cm.hidden=false;ci.focus();dn.disabled=up.disabled=true};

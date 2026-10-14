@@ -24,7 +24,13 @@ jobs:
       - name: Point the chat page at the hosted API
         env:
           API_BASE: ${{ vars.API_BASE }}
-        run: printf 'window.LOGIPILOT_API = "%s";\n' "${API_BASE%/}" > web/static/js/config.js
+        # No API_BASE yet -> null, which puts the chat page in labelled demo mode instead of 405s.
+        run: |
+          if [ -n "$API_BASE" ]; then
+            printf 'window.LOGIPILOT_API = "%s";\n' "${API_BASE%/}" > web/static/js/config.js
+          else
+            printf 'window.LOGIPILOT_API = null;\n' > web/static/js/config.js
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
