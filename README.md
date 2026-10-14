@@ -1,11 +1,18 @@
 # LogiPilot
 
-A conversational multi-agent logistics exception handler: you describe a shipment problem (text, voice dictation, photos, PDFs, CSVs), and LogiPilot routes it to a specialist, acts through tools, checks its own answer, and hands anything risky to a human.
+A conversational multi-agent logistics exception handler: you describe a shipment problem (text, voice dictation, photos, PDFs, Excel sheets, CSVs), and LogiPilot routes it to a specialist, acts through tools, checks its own answer, and hands anything risky to a human.
 
 Built for the **Agent Wars** hackathon, topic **Logistics Handler**.
 
 - Repository: https://github.com/aigamer-dev/logipilot
-- Live demo: `[Cloud Run URL]`
+- Landing page (GitHub Pages): https://aigamer-dev.github.io/logipilot/
+- Live API + chat: being deployed; the URL will be added here. Until then, run it locally in about five minutes (see [Quickstart](#15-quickstart)).
+
+> **Note for judges**
+> - **Cold start:** the hosted backend runs on a free tier that sleeps when idle. The first request after a quiet period can take **30-60 seconds** while the container wakes and the agents load. Later requests take about 5-20 seconds: each turn makes several real model calls (decomposer, Jev triage, specialist with tool calls, Jev verifier).
+> - **If the chat shows "Failed to fetch"** the backend was waking up or restarting. Press **Retry**.
+> - **Demo data is synthetic:** tracking ids `LP1001`-`LP1012`, SKUs such as `SKU-PHONE-01`. Weather is live from Open-Meteo.
+> - **One-command test run:** `python -m scripts.demo_cases [base_url]` runs 13 scenarios, covering an image, a PDF, an Excel sheet, CSVs, multi-turn, guardrails, hazmat and PII, and prints PASS/FAIL per case. Sample files are in `tests/fixtures/`.
 
 ---
 

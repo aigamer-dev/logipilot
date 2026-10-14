@@ -204,7 +204,7 @@ class MasterOrchestrator(BaseAgent):
             value = max(float(rec.get("declared_value_usd") or 0), contract.claimed_value_usd)
             if contract.category in MONEY_SKILLS and value > config.HIGH_VALUE_USD:
                 return "escalate", f"{rec['tracking_id']} has ${value:,.0f} at stake"
-        if contract.claimed_value_usd > config.HIGH_VALUE_USD:
+        if contract.category in MONEY_SKILLS and contract.claimed_value_usd > config.HIGH_VALUE_USD:
             return "escalate", f"${contract.claimed_value_usd:,.0f} at stake"
         return "proceed", "all gates passed"
 

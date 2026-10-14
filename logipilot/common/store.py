@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 
 from google.cloud import firestore
 
+from logipilot.common import config  # noqa: F401  (loads .env before the client reads env vars)
+
 db = firestore.AsyncClient(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
 
 
