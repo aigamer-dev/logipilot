@@ -250,9 +250,9 @@ class MasterOrchestrator(BaseAgent):
             contract.advance("EXECUTING", "specialist", f"attempt {contract.attempts}")
             t0 = time.monotonic()
             ok = False
-            async for event, ok in self._run(
+            async for event, ok in self._run(  # noqa: B007 - last value read after the loop
                 contract.category, ctx
-            ):  # noqa: B007 - the last value is read after the loop
+            ):
                 if event:
                     for resp in event.get_function_responses() or []:
                         evidence.append(json.dumps(resp.response, default=str)[:3000])

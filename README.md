@@ -625,6 +625,8 @@ curl -s -X POST localhost:8090/actions/damage-claim -H 'Content-Type: applicatio
 
 The MCP server speaks streamable HTTP at **http://localhost:8091/mcp** (and `GET /health` for liveness). Any streamable-HTTP MCP client can connect and list the 12 tools: `lookup_shipment`, `shipment_risk`, `hub_weather`, `check_inventory`, `find_alternate_carriers`, `file_damage_claim`, `create_return`, `reroute_shipment`, `request_customs_documents`, `open_billing_dispute`, `create_replenishment_order`, `notify_customer`.
 
+> **Security:** the MCP server and the tools API return raw shipment records (including customer contact details) and can create actions, and they have no user authentication. They therefore bind to `127.0.0.1` by default, and in single-process mode the mounted copies answer only loopback requests. Set `MCP_HOST=0.0.0.0` only on a trusted network, and set `TOOLS_API_KEY` so the MCP server and tools API share a secret.
+
 For a client that only launches stdio servers (for example Claude Desktop), a bridge such as the `mcp-remote` npm package can point at the URL. This is a third-party tool, not part of this repository:
 
 ```json

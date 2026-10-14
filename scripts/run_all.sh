@@ -16,7 +16,7 @@ if [ "${SINGLE_PROCESS:-}" = "1" ]; then
 fi
 export TOOLS_API_URL="${TOOLS_API_URL:-http://localhost:8090}"
 export MCP_URL="${MCP_URL:-http://localhost:8091/mcp}"
-"$PY" -m uvicorn logipilot.tools_api.main:app --host 0.0.0.0 --port 8090 --log-level warning &
+"$PY" -m uvicorn logipilot.tools_api.main:app --host 127.0.0.1 --port 8090 --log-level warning &
 PORT=8091 "$PY" -m logipilot.mcp_server.main &
 for _ in $(seq 1 30); do curl -sf localhost:8090/health >/dev/null && break; sleep 1; done
 exec "$PY" -m uvicorn logipilot.web.server:app --host 0.0.0.0 --port "${PORT:-8000}"

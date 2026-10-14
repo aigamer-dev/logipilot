@@ -73,6 +73,25 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+INTERNAL_PREFIXES = ("/tools", "/mcp-server")
+
+
+@app.middleware("http")
+async def internal_only(request, call_next):
+    """The mounted tools API and MCP server serve this process only, never the internet.
+
+    They return raw shipment records (customer contact details) and can create actions, so any
+    request that does not come from loopback gets a 404 as if they did not exist.
+    """
+    if request.url.path.startswith(INTERNAL_PREFIXES) and (
+        request.client is None or request.client.host not in ("127.0.0.1", "::1")
+    ):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await call_next(request)
+
+
 if SINGLE_PROCESS:
     from logipilot.mcp_server.main import mcp
     from logipilot.tools_api.main import app as tools_app

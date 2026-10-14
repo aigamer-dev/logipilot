@@ -8,7 +8,12 @@ from starlette.responses import JSONResponse
 
 from logipilot.common.tools_client import TOOLS
 
-mcp = FastMCP("logipilot-tools", host="0.0.0.0", port=int(os.getenv("PORT", "8091")))
+# Loopback by default: set MCP_HOST=0.0.0.0 only to serve trusted external MCP clients.
+mcp = FastMCP(
+    "logipilot-tools",
+    host=os.getenv("MCP_HOST", "127.0.0.1"),
+    port=int(os.getenv("PORT", "8091")),
+)
 
 # Register the client functions directly so names, signatures and docstrings stay identical.
 for _tool in TOOLS:
