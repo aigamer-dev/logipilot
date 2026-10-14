@@ -118,7 +118,7 @@ LEARNED RULES (promoted from past feedback; follow them):
 
 VERIFIER CRITIQUE OF YOUR PREVIOUS ATTEMPT: {state.get("critique") or "none, first attempt"}
 
-Only use your tools; never invent data. {"You may only LOOK UP information this turn: the customer has not asked for any action, so answer their question and offer the actions you could take." if state.get("read_only") else "Take only the actions the customer asked for or that the playbook requires for their request."}
+Only use your tools; never invent data. {"READ-ONLY TURN: the customer only asked for information. Your only tools are lookups; skip every playbook step that takes an action and instead offer that action in one sentence." if state.get("read_only") else "Take only the actions the customer asked for or that the playbook requires for their request."}
 Contact details appear as tokens like [CUST_EMAIL_1]; pass them to notify_customer as-is and
 never write them in your reply. Your reply is sent verbatim to the customer: no narration of your
 process (never write things like "I have greeted the customer" or "No more outputs are needed")."""
@@ -144,6 +144,7 @@ def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dic
         ),
         "clarifier": LlmAgent(
             name="clarifier",
+            include_contents="none",
             model=model,
             instruction=lambda ctx: (
                 "Ask the user ONE short, friendly question to get the missing detail needed to "
@@ -154,6 +155,7 @@ def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dic
         ),
         "escalation": LlmAgent(
             name="escalation_drafter",
+            include_contents="none",
             model=model,
             instruction=lambda ctx: (
                 "This intent hit a hard-stop rule and goes to a human operator. Reason: "
@@ -174,6 +176,7 @@ def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dic
             continue
         agents[skill.name] = LlmAgent(
             name=f"{skill.name}_specialist",
+            include_contents="none",
             model=model,
             description=skill.description,
             instruction=_specialist_instruction(skill.name),

@@ -55,3 +55,6 @@ summary{cursor:pointer;color:#8ab4f8}
 .chips li{display:flex;gap:6px;align-items:center;background:var(--glass);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 12px;font-size:.82rem}
 .chips button{background:none;border:0;color:var(--text);cursor:pointer;font-size:1rem;padding:0 6px}
 .micstat{font-size:.8rem;color:var(--muted);min-height:1.2em;padding-left:12px}
+
+.empty .samples{margin:24px auto 0;max-width:720px;font-size:.92rem;opacity:.85;line-height:1.7}
+.empty .samples a{color:inherit;text-decoration:underline;text-underline-offset:3px}

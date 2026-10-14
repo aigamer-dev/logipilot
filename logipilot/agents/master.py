@@ -152,9 +152,10 @@ class MasterOrchestrator(BaseAgent):
                     ],
                 ),
                 "action_requested": jev.noul(
-                    "The customer explicitly asks for something to be done (file a claim, reroute, "
-                    "change address, return, dispute a charge, reorder stock, notify someone), "
-                    "not just for information or status"
+                    "The customer wants something done or fixed: an explicit request (file a "
+                    "claim, reroute, change address, return, reorder stock, notify someone) or a "
+                    "complaint that needs a remedy (charged twice, wrong fee, damaged or lost "
+                    "goods). False when they only ask for status or information."
                 ),
                 "hazmat": jev.noul(
                     "The goods involve hazardous materials such as lithium batteries, chemicals or "

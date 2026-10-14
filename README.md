@@ -14,6 +14,19 @@ Built for the **Agent Wars** hackathon, topic **Logistics Handler**.
 > - **Demo data is synthetic:** tracking ids `LP1001`-`LP1012`, SKUs such as `SKU-PHONE-01`. Weather is live from Open-Meteo.
 > - **One-command test run:** `python -m scripts.demo_cases [base_url]` runs 13 scenarios, covering an image, a PDF, an Excel sheet, CSVs, multi-turn, guardrails, hazmat and PII, and prints PASS/FAIL per case. Sample files are in `tests/fixtures/`.
 
+### Test files you can attach
+
+Download them from the chat page ("Sample files to attach") or use `tests/fixtures/`. Regenerate them with `python -m scripts.make_fixtures`.
+
+| File | Type | Type this with it | Expected |
+|---|---|---|---|
+| `lp1002_crushed_carton.png` | Image | "My TV arrived like this, please file a claim." | Damage claim, inspection return and customer notice for LP1002 |
+| `lp1004_commercial_invoice.pdf` | PDF | "Customs is holding my shipment, here is the commercial invoice. Please request whatever else is missing." | Customs specialist reads the invoice and requests only the still-missing documents |
+| `stock_report.xlsx` | Excel | "Look at this stock report and replenish whatever is out of stock in Bengaluru." | Replenishment order for SKU-PHONE-01 at BLR |
+| `late_orders.csv` | CSV | "Why are these orders late?" | One contract per order: LP1001 (weather) and LP1012 (carrier strike) |
+| `injection.csv` | CSV | "please process this file" | Refused: prompt injection hidden in the attachment |
+| `corrupt.pdf` | PDF (broken) | "see attached" | Handled politely; no server error |
+
 ---
 
 ## Contents

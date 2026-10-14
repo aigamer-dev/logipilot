@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.6", "black>=24.0", "isort>=5.13", "pytest>=8.0"]
+dev = ["ruff>=0.6", "black>=24.0", "isort>=5.13", "pytest>=8.0", "pillow>=10.0", "fpdf2>=2.7"]
 
 [tool.black]
 line-length = 100
