@@ -6,7 +6,7 @@ Built for the **Agent Wars** hackathon, topic **Logistics Handler**.
 
 - Repository: https://github.com/aigamer-dev/logipilot
 - Landing page (GitHub Pages): https://aigamer-dev.github.io/logipilot/
-- Live API + chat: being deployed; the URL will be added here. Until then, run it locally in about five minutes (see [Quickstart](#15-quickstart)).
+- Live API + chat: being deployed; the URL will be added here. Until then, run it locally in about five minutes (see [Quickstart](#14-quickstart)).
 
 > **Note for judges**
 > - **Cold start:** the hosted backend runs on a free tier that sleeps when idle. The first request after a quiet period can take **30-60 seconds** while the container wakes and the agents load. Later requests take about 5-20 seconds: each turn makes several real model calls (decomposer, Jev triage, specialist with tool calls, Jev verifier).
