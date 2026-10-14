@@ -1,0 +1,19 @@
+# One-click Render blueprint: Dashboard -> New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: logipilot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: GOOGLE_CLOUD_PROJECT
+        value: logipilot-gdg26-27638
+      - key: TYPESAFE_API_KEY
+        sync: false
+      - key: OLLAMA_KEY
+        sync: false
+      - key: GCP_SA_KEY_JSON
+        sync: false
