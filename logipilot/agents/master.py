@@ -29,6 +29,17 @@ mcp_breaker = healing.CircuitBreaker("mcp")
 ACTION_ID = re.compile(r'action_id\\*"\s*:\s*\\*"(\w+)')
 ACTION_KIND = re.compile(r'"?kind\\*"\s*:\s*\\*"(\w+)')
 MONEY_SKILLS = {"damage", "lost", "returns", "billing"}
+# Deterministic id extraction backs up the decomposer: ids in the text are never dropped.
+ID_PATTERNS = {
+    "tracking_ids": re.compile(r"\bLP\d{4}\b", re.I),
+    "skus": re.compile(r"\bSKU-[A-Z0-9-]+\b", re.I),
+    "reference_ids": re.compile(r"\b(?:INV|PO|ORD)-\d+\b", re.I),
+}
+
+
+def _merge_ids(found: list[str], text: str, pattern: re.Pattern) -> list[str]:
+    ids = [i.upper() for i in found] + [m.upper() for m in pattern.findall(text)]
+    return list(dict.fromkeys(ids))
 
 
 class MasterOrchestrator(BaseAgent):
@@ -63,9 +74,17 @@ class MasterOrchestrator(BaseAgent):
         contracts = [
             Contract(
                 fragment=i.get("fragment") or _user_text(ctx),
-                tracking_ids=[t.upper() for t in i.get("tracking_ids") or []],
-                skus=[s.upper() for s in i.get("skus") or []],
-                reference_ids=i.get("reference_ids") or [],
+                tracking_ids=_merge_ids(
+                    i.get("tracking_ids") or [],
+                    i.get("fragment") or "",
+                    ID_PATTERNS["tracking_ids"],
+                ),
+                skus=_merge_ids(i.get("skus") or [], i.get("fragment") or "", ID_PATTERNS["skus"]),
+                reference_ids=_merge_ids(
+                    i.get("reference_ids") or [],
+                    i.get("fragment") or "",
+                    ID_PATTERNS["reference_ids"],
+                ),
                 claimed_value_usd=float(i.get("claimed_value_usd") or 0),
                 missing_info=i.get("missing_info") or "",
                 evidence=i.get("evidence") or "",
@@ -148,8 +167,12 @@ class MasterOrchestrator(BaseAgent):
         """Hard-stop gate. Returns (decision, reason), decision in proceed|ask|escalate."""
         skill = registry()[contract.category]
         missing = [f for f in skill.required_fields if not getattr(contract, f)]
+        has_ids = bool(contract.tracking_ids or contract.skus or contract.reference_ids)
+        # With an id in hand a lookup beats a question; without one, low confidence means ask.
         unsure = (
-            contract.category != "general" and contract.confidence < config.MIN_ROUTE_CONFIDENCE
+            contract.category != "general"
+            and contract.confidence < config.MIN_ROUTE_CONFIDENCE
+            and not has_ids
         )
         if missing or unsure:
             if ctx.session.state.get("clarifications", 0) >= config.MAX_CLARIFICATIONS:

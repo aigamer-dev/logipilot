@@ -9,6 +9,8 @@ services:
     envVars:
       - key: PORT
         value: "8000"
+      - key: SINGLE_PROCESS
+        value: "1"
       - key: GOOGLE_CLOUD_PROJECT
         value: logipilot-gdg26-27638
       - key: TYPESAFE_API_KEY

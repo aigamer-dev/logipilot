@@ -9,6 +9,11 @@ if [ -n "${GCP_SA_KEY_JSON:-}" ]; then
   export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa.json
 fi
 PY="${PYTHON:-python}"
+if [ "${SINGLE_PROCESS:-}" = "1" ]; then
+  export TOOLS_API_URL="http://localhost:${PORT:-8000}/tools"
+  export MCP_URL="http://localhost:${PORT:-8000}/mcp-server/mcp"
+  exec "$PY" -m uvicorn logipilot.web.server:app --host 0.0.0.0 --port "${PORT:-8000}"
+fi
 export TOOLS_API_URL="${TOOLS_API_URL:-http://localhost:8090}"
 export MCP_URL="${MCP_URL:-http://localhost:8091/mcp}"
 "$PY" -m uvicorn logipilot.tools_api.main:app --host 0.0.0.0 --port 8090 --log-level warning &

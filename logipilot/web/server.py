@@ -1,5 +1,7 @@
 """Public web app: landing page, chat page and the chat REST API (FastAPI, same origin)."""
 
+import contextlib
+import os
 import time
 from pathlib import Path
 
@@ -15,7 +17,29 @@ STATIC = Path(__file__).resolve().parents[2] / "web" / "static"
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_FILES = 5
 
-app = FastAPI(title="LogiPilot", version="1.0.0")
+# Single-process mode (small hosts): the tools API and MCP server are mounted in this app and
+# still reached over HTTP/MCP, so the agent path is identical to the three-service layout.
+SINGLE_PROCESS = os.getenv("SINGLE_PROCESS") == "1"
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    if not SINGLE_PROCESS:
+        yield
+        return
+    from logipilot.mcp_server.main import mcp
+
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(title="LogiPilot", version="1.0.0", lifespan=lifespan)
+if SINGLE_PROCESS:
+    from logipilot.mcp_server.main import mcp
+    from logipilot.tools_api.main import app as tools_app
+
+    app.mount("/tools", tools_app)
+    app.mount("/mcp-server", mcp.streamable_http_app())
 
 
 @app.post("/api/chat")
