@@ -5,7 +5,7 @@ services:
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /api/health
+    healthCheckPath: /  # static page; /api/health calls paid APIs
     envVars:
       - key: PORT
         value: "8000"
