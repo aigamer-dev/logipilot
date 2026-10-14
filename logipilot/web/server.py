@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="LogiPilot", version="1.0.0", lifespan=lifespan)
+# The GitHub Pages frontend calls this API cross-origin; only listed origins are allowed.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "https://aigamer-dev.github.io").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 if SINGLE_PROCESS:
     from logipilot.mcp_server.main import mcp
     from logipilot.tools_api.main import app as tools_app

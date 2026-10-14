@@ -50,7 +50,7 @@ $('#newchat').onclick=()=>{sid=crypto.randomUUID();store.set('lp_sid',sid);msgs.
 async function api(text,fl){
  if(mock){await new Promise(r=>setTimeout(r,1600));return mockEnv(text)}
  const fd=new FormData();fd.append('session_id',sid);fd.append('message',text);fl.forEach(f=>fd.append('files',f,f.name));
- const r=await fetch('/api/chat',{method:'POST',body:fd});
+ const r=await fetch(window.LOGIPILOT_API+'/api/chat',{method:'POST',body:fd});
  let j=null;try{j=await r.json()}catch{}
  if(!r.ok)throw new Error((j&&j.detail)||('Request failed ('+r.status+')'));
  return j}
@@ -79,7 +79,7 @@ function render(env){
  up.type=dn.type='button';up.setAttribute('aria-label','Helpful');dn.setAttribute('aria-label','Not helpful');up.setAttribute('aria-pressed','false');dn.setAttribute('aria-pressed','false');
  const cm=el('div','cm');cm.hidden=true;const ci=el('input');ci.type='text';ci.placeholder='What went wrong? (optional)';ci.setAttribute('aria-label','Feedback comment');
  const cs=el('button','btn sm','Submit');cs.type='button';cm.append(ci,cs);
- const fb=async(rating,comment)=>{try{if(!mock){const r=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turn_id:env.turn_id,rating,comment:comment||null})});if(!r.ok)throw 0}
+ const fb=async(rating,comment)=>{try{if(!mock){const r=await fetch(window.LOGIPILOT_API+'/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turn_id:env.turn_id,rating,comment:comment||null})});if(!r.ok)throw 0}
   up.disabled=dn.disabled=true;cs.disabled=ci.disabled=true;meta.append(el('span','files','Thanks for the feedback.'))}catch{meta.append(el('span','files','Could not send feedback.'))}};
  up.onclick=()=>{up.setAttribute('aria-pressed','true');fb(1)};
  dn.onclick=()=>{dn.setAttribute('aria-pressed','true');cm.hidden=false;ci.focus();dn.disabled=up.disabled=true};
@@ -102,7 +102,7 @@ function detail(env){
 /* health */
 const COMP=['tools_api','mcp','jev','llm','firestore'];const NAME={llm:'Gemma 4'};
 async function health(){const ul=$('#health');let j=null;
- try{j=mock?{components:Object.fromEntries(COMP.map(c=>[c,{ok:true,detail:'mock'}]))}:await (await fetch('/api/health')).json()}catch{}
+ try{j=mock?{components:Object.fromEntries(COMP.map(c=>[c,{ok:true,detail:'mock'}]))}:await (await fetch(window.LOGIPILOT_API+'/api/health')).json()}catch{}
  ul.replaceChildren();COMP.forEach(c=>{const x=j&&j.components&&j.components[c];const li=el('li');
   const dot=el('i','dot'+(x?(x.ok?' ok':' bad'):''));li.title=(NAME[c]||c)+': '+(x?(x.ok?'ok':'down')+' - '+(x.detail||''):'unknown');
   li.append(dot,el('span',null,NAME[c]||c));li.setAttribute('aria-label',li.title);ul.append(li)})}
