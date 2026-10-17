@@ -2,8 +2,8 @@
 const $=s=>document.querySelector(s);
 // No backend configured (static hosting such as GitHub Pages): run in labelled demo mode.
 const noBackend=window.LOGIPILOT_API===null;
-const mock=noBackend||new URLSearchParams(location.search).has('mock');
-if(noBackend)document.addEventListener('DOMContentLoaded',()=>{const b=document.createElement('div');b.className='demo-banner';b.setAttribute('role','status');b.innerHTML='<b>Demo mode:</b> this static copy has no live backend, so answers are canned examples. Run the full agent locally in five minutes: see the <a href="https://github.com/aigamer-dev/logipilot#14-quickstart">README quickstart</a>.';document.querySelector('main').prepend(b)});
+const mock=new URLSearchParams(location.search).has('mock');
+if(noBackend)document.addEventListener('DOMContentLoaded',()=>{const b=document.createElement('div');b.className='demo-banner';b.setAttribute('role','status');b.innerHTML='<b>Preview only:</b> this static copy has no agent behind it. Run the full agent locally in five minutes: see the <a href="https://github.com/aigamer-dev/logipilot#14-quickstart">README quickstart</a>.';document.querySelector('main').prepend(b)});
 const store={get:k=>{try{return sessionStorage.getItem(k)}catch{return null}},set:(k,v)=>{try{sessionStorage.setItem(k,v)}catch{}}};
 let sid=store.get('lp_sid');if(!sid){sid=crypto.randomUUID();store.set('lp_sid',sid)}
 let files=[],busy=false,rec=null;
@@ -51,6 +51,7 @@ document.querySelectorAll('.prompt').forEach(b=>b.onclick=()=>send(b.textContent
 $('#newchat').onclick=()=>{sid=crypto.randomUUID();store.set('lp_sid',sid);msgs.replaceChildren();$('#empty').hidden=false;files=[];renderChips();msg.focus()};
 /* network */
 async function api(text,fl){
+ if(noBackend)return noBackendEnv();
  if(mock){await new Promise(r=>setTimeout(r,1600));return mockEnv(text)}
  const fd=new FormData();fd.append('session_id',sid);fd.append('message',text);fl.forEach(f=>fd.append('files',f,f.name));
  const r=await fetch(window.LOGIPILOT_API+'/api/chat',{method:'POST',body:fd});
@@ -111,6 +112,8 @@ async function health(){const ul=$('#health');let j=null;
   li.append(dot,el('span',null,NAME[c]||c));li.setAttribute('aria-label',li.title);ul.append(li)})}
 health();setInterval(health,30000);
 /* mock */
+// Static hosting with no API: say so plainly instead of inventing a shipment answer.
+function noBackendEnv(){return{session_id:sid,turn_id:'static-'+Date.now(),status:'FAILED',answer:'**This page is a static preview with no agent behind it**, so I can\'t answer yet: nothing you type here reaches LogiPilot.\n\nRun the real agent locally in two commands (it fetches the keys automatically):\n\n```bash\ngit clone https://github.com/aigamer-dev/logipilot && cd logipilot\ncp .env.judges .env && scripts/run_all.sh   # then open http://localhost:8000\n```\n\nSee the [README](https://github.com/aigamer-dev/logipilot#readme) for details.',contracts:[],trace:[],incidents:[],guardrail_flags:[],pii_vaulted:0,latency_ms:0}}
 function mockEnv(t){return{session_id:sid,turn_id:'mock-'+Date.now(),answer:`**LP1001** is delayed.\n\n- Last scan: Pune hub\n- New ETA: tomorrow 6 PM\n\nYou said: _${t.replace(/[<>]/g,'')}_ <img src=x onerror=alert(1)>`,status:'RELEASED',
  contracts:[{contract_id:'c1',fragment:'Where is LP1001?',category:'delay',confidence:.93,status:'RELEASED',history:['ISSUED>ACCEPTED','ACCEPTED>EXECUTING','EXECUTING>VERIFIED','VERIFIED>RELEASED'].map(p=>({from:p.split('>')[0],to:p.split('>')[1],by:'jev',at:''})),attempts:1,verification:{resolves:.95,grounded:.9,policy_ok:1,passed:true},actions:[{action_id:'ACT-1',kind:'notify_customer'}]}],
  trace:[{step:'guardrails',detail:'clean',ms:12},{step:'specialist:delay',detail:'tracking lookup',ms:430}],incidents:[{component:'mcp',error:'timeout',recovery:'retried, ok'}],guardrail_flags:[],pii_vaulted:2,latency_ms:1420}}
