@@ -506,8 +506,8 @@ The image is `python:3.14-slim`, installs dependencies with uv, copies `logipilo
 The live instance runs on [SnapDeploy](https://snapdeploy.dev)'s free tier, built straight from this repository's `Dockerfile`:
 
 1. New container → From GitHub repo → `aigamer-dev/logipilot`, branch `master`.
-2. Runtime environment variables: `SINGLE_PROCESS=1`, plus `KEY_VAULT_URL` and `KEY_VAULT_TOKEN` from `.env.judges`. Do not set `PORT`; SnapDeploy injects it and `scripts/run_all.sh` reads it.
-3. Set the health check path to `/healthz` (instant liveness, no external calls). Do not use `/api/health`: it probes Jev, the LLM and Firestore and is meant for the chat page.
+2. Runtime environment variables: `KEY_VAULT_URL` and `KEY_VAULT_TOKEN` from `.env.judges` (the image already sets `SINGLE_PROCESS=1`). Do not set `PORT`; SnapDeploy injects it and `scripts/run_all.sh` reads it.
+3. Set the health check path to `/healthz`. It answers instantly from a small front door (`logipilot/web/boot.py`) that binds the port at once and starts the app in a child process, so the ~20 s ADK import on a 0.25 vCPU container never fails the health check. Do not use `/api/health`: it probes Jev, the LLM and Firestore and is meant for the chat page.
 4. Deploy.
 
 Single-process mode mounts the tools API and MCP server inside the web app (about 400 MB, within the 512 MB free container), and all keys come from the Cloudflare vault at startup. Free containers sleep after 15 idle minutes and take about a minute to wake.
