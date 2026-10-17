@@ -68,10 +68,10 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
-# The GitHub Pages frontend calls this API cross-origin; only listed origins are allowed.
+# The pages are served from this same app, so cross-origin calls are off unless listed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "https://aigamer-dev.github.io").split(","),
+    allow_origins=[o for o in os.getenv("CORS_ORIGINS", "").split(",") if o],
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )

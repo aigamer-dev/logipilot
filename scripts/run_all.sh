@@ -3,14 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONNOUSERSITE=1
-# Hosts without gcloud (e.g. Hugging Face Spaces) pass the Firestore service-account key as a secret.
-if [ -n "${GCP_SA_KEY_JSON:-}" ]; then
-  umask 077 && printf '%s' "$GCP_SA_KEY_JSON" > /tmp/gcp-sa.json
-  export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa.json
-fi
 PY="${PYTHON:-python}"
-# Hosts that inject their own port variable (Zoho Catalyst AppSail) override the default.
-export PORT="${X_ZOHO_CATALYST_LISTEN_PORT:-${PORT:-8000}}"
+export PORT="${PORT:-8000}"  # hosts such as SnapDeploy inject PORT
 # Shared secret between the agents and the internal tools API / MCP server, fresh per boot.
 export TOOLS_API_KEY="${TOOLS_API_KEY:-$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
 if [ "${SINGLE_PROCESS:-}" = "1" ]; then

@@ -5,7 +5,7 @@ A conversational multi-agent logistics exception handler: you describe a shipmen
 Built for the **Agent Wars** hackathon, topic **Logistics Handler**.
 
 - Repository: https://github.com/aigamer-dev/logipilot
-- Landing page (GitHub Pages): https://aigamer-dev.github.io/logipilot/
+- Live app (SnapDeploy): `[SnapDeploy URL]`
 - Live API + chat: being deployed; the URL will be added here. Until then, run it locally in about five minutes (see [Quickstart](#14-quickstart)).
 
 > **Note for judges: run it with our keys in two commands**
@@ -501,30 +501,15 @@ docker run -p 8000:8000 --env-file .env \
 
 The image is `python:3.14-slim`, installs dependencies with uv, copies `logipilot/`, `skills/`, `web/` and `scripts/`, and runs `scripts/run_all.sh`. `.env` is excluded from the image (`.dockerignore`), so pass it with `--env-file`. The mounted gcloud directory supplies the Application Default Credentials created in step 3.
 
-### Cloud Run
+### Hosted (SnapDeploy)
 
-Store the two secrets, grant the runtime service account access, then deploy from source (the repository's Dockerfile is used):
+The live instance runs on [SnapDeploy](https://snapdeploy.dev)'s free tier, built straight from this repository's `Dockerfile`:
 
-```bash
-export PROJECT=<your-project-id>
-gcloud services enable run.googleapis.com firestore.googleapis.com secretmanager.googleapis.com \
-  cloudbuild.googleapis.com artifactregistry.googleapis.com --project $PROJECT
+1. New container → From GitHub repo → `aigamer-dev/logipilot`, branch `master`.
+2. Runtime environment variables: `SINGLE_PROCESS=1`, plus `KEY_VAULT_URL` and `KEY_VAULT_TOKEN` from `.env.judges`. Do not set `PORT`; SnapDeploy injects it and `scripts/run_all.sh` reads it.
+3. Deploy. The health check hits `/` (the landing page).
 
-printf '%s' "$TYPESAFE_API_KEY" | gcloud secrets create typesafe-api-key --data-file=- --project $PROJECT
-printf '%s' "$OLLAMA_KEY"       | gcloud secrets create ollama-key --data-file=- --project $PROJECT
-
-# The default runtime identity is the Compute Engine service account.
-SA=$(gcloud projects describe $PROJECT --format='value(projectNumber)')-compute@developer.gserviceaccount.com
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SA --role roles/datastore.user
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SA --role roles/secretmanager.secretAccessor
-
-gcloud run deploy logipilot --source . --region us-central1 --allow-unauthenticated \
-  --memory 2Gi --port 8000 \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT \
-  --set-secrets TYPESAFE_API_KEY=typesafe-api-key:latest,OLLAMA_KEY=ollama-key:latest
-```
-
-`--port 8000` pins the web app port; inside the container the tools API (8090) and MCP server (8091) run beside it. Seed Firestore once from your machine (step 3) against the same project. Keep `--max-instances 1`: see [Known limitations](#20-known-limitations).
+Single-process mode mounts the tools API and MCP server inside the web app (about 400 MB, within the 512 MB free container), and all keys come from the Cloudflare vault at startup. Free containers sleep after 15 idle minutes and take about a minute to wake.
 
 ## 15. Configuration
 
@@ -706,14 +691,14 @@ The Makefile's `fmt` and `lint` targets also list a `frontend` directory that do
 
 - **The Gemini fallback is a free-tier key.** When Ollama cloud is down, agents heal onto `gemini-flash-latest` (key from a billing-free Google project). Its per-minute quota covers a short outage at demo traffic; a sustained outage hits the free-tier limit (HTTP 429), and the turn then fails safely with a ticket.
 
-- **Sessions are in memory.** ADK conversation state uses `InMemorySessionService`: it is lost on restart and not shared between instances, so run a single instance (on Cloud Run, for example `--max-instances 1`). Turns, cases and the PII vault are persisted to Firestore, but they are not reloaded into a new session.
+- **Sessions are in memory.** ADK conversation state uses `InMemorySessionService`: it is lost on restart and not shared between instances, so run a single instance (the SnapDeploy container is one instance). Turns, cases and the PII vault are persisted to Firestore, but they are not reloaded into a new session.
 - **Voice is browser dictation, not audio to the model.** The mic button uses the browser's Web Speech API (`SpeechRecognition`) to put text in the input box; support depends on the browser. Uploaded audio files are not transcribed or sent to the model.
 - **The Jev fallback uses an LLM.** When Jev is unreachable (or `TYPESAFE_API_KEY` is missing), triage, the hard-stop inputs and the verifier are answered by the same Ollama model that writes the replies, with no calibrated probabilities and no independence from the drafter. The answers are marked `llm_fallback` in the data, but the thresholds apply unchanged.
 - **Demo data is synthetic.** Hubs, shipments, customers, invoices, lanes and prices are invented by `scripts/seed.py`. Only the weather is live. Write tools record `open` action documents in Firestore; nothing is sent to a real carrier, billing system or inbox, and `notify_customer` does not send email.
 - **Vault coverage is partial.** The vault tokenizes PII in what the user types or attaches as text. It does not redact text inside images, and customer details returned by the tools (the seeded shipment records) reach the model as stored. The `turns` document stores the tokenized answer and message; only the response sent back to the user is detokenized.
 - **Deadline is soft.** `TURN_DEADLINE_S` is only checked after a verifier rejection; it does not interrupt a slow model or tool call.
-- **A rejected final draft is still shown.** When the repair loop is exhausted the last draft is returned with a note that a human will double-check, and the contract is stored in `escalations`; there is no human work queue in this repository.
+- **Human hand-off is a ticket, not a staffed queue.** Escalations open a ticket (`TKT-…`) that staff answer through the admin endpoint; there is no operator UI in this repository.
 - **The eval gate is thin.** It replays one seeded case per category, scored by the Jev verifier, so a noisy score can promote or reject a rule. A category with no eval case (for example `general`) is skipped: with no evidence, no rule is promoted.
-- **Guardrails are regular expressions.** They are narrow on purpose and will miss paraphrases; the model-level instructions are the second line.
+- **Guardrails are two layers, not a guarantee.** Narrow regular expressions run first, then one multilingual Jev check for injection, unlawful requests and off-topic asks; novel phrasings can still get through to the model-level instructions.
 - **Some thresholds are constants.** The severity (2.5), hazmat (0.7) and verifier floors are in `master.py`, not environment variables.
-- **No authentication on the chat API or the MCP endpoint.** `--allow-unauthenticated` on Cloud Run makes the chat and `/api/improve` public.
+- **The chat API has no user login.** Anyone with the URL can chat; `/api/improve` and ticket replies need the admin token, and the tools API and MCP server are internal-only (loopback plus a per-boot key).
