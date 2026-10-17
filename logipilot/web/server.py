@@ -260,21 +260,23 @@ async def admin_tickets(status: str = "open", x_admin_token: str = Header(defaul
         key=lambda t: t.get("created_at", ""),
         reverse=True,
     )
-    out = []
-    for t in rows:
-        vault = await pii_vault.load(t["session_id"])
-        case = await store.get_doc("cases", t.get("contract_id") or "") or {}
-        out.append(
-            {
-                **{k: t.get(k) for k in ("ticket_id", "status", "category", "reason",
-                                         "tracking_ids", "human_reply", "created_at")},
-                "request": pii_vault.mask_text(t.get("fragment") or "", vault),
-                "ai_answer": pii_vault.mask_text(case.get("answer") or "", vault),
-                "actions": case.get("actions") or [],
-                "verification": case.get("verification"),
-            }
-        )  # fmt: skip
-    return {"tickets": out}
+    async def view(t: dict) -> dict:
+        # Both reads per ticket, and all tickets, run concurrently (sequential took ~40 s for 64).
+        vault, case = await asyncio.gather(
+            pii_vault.load(t["session_id"]),
+            store.get_doc("cases", t.get("contract_id") or "-"),
+        )
+        case = case or {}
+        return {
+            **{k: t.get(k) for k in ("ticket_id", "status", "category", "reason",
+                                     "tracking_ids", "human_reply", "created_at")},
+            "request": pii_vault.mask_text(t.get("fragment") or "", vault),
+            "ai_answer": pii_vault.mask_text(case.get("answer") or "", vault),
+            "actions": case.get("actions") or [],
+            "verification": case.get("verification"),
+        }  # fmt: skip
+
+    return {"tickets": await asyncio.gather(*(view(t) for t in rows))}
 
 
 @app.post("/api/tickets/{ticket_id}/reply")
