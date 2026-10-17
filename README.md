@@ -8,7 +8,13 @@ Built for the **Agent Wars** hackathon, topic **Logistics Handler**.
 - Landing page (GitHub Pages): https://aigamer-dev.github.io/logipilot/
 - Live API + chat: being deployed; the URL will be added here. Until then, run it locally in about five minutes (see [Quickstart](#14-quickstart)).
 
-> **Note for judges**
+> **Note for judges: run it with our keys in two commands**
+> ```bash
+> cp .env.judges .env        # holds only a revocable token for our key vault, no API keys
+> scripts/run_all.sh          # then open http://localhost:8000
+> ```
+> At startup the app fetches the Jev, Ollama and Firestore credentials from a Cloudflare Worker vault (`vault/worker.js`), so no API key is committed here. The token will be revoked after judging.
+>
 > - **Cold start:** the hosted backend runs on a free tier that sleeps when idle. The first request after a quiet period can take **30-60 seconds** while the container wakes and the agents load. Later requests take about 5-20 seconds: each turn makes several real model calls (decomposer, Jev triage, specialist with tool calls, Jev verifier).
 > - **If the chat shows "Failed to fetch"** the backend was waking up or restarting. Press **Retry**.
 > - **Demo data is synthetic:** tracking ids `LP1001`-`LP1012`, SKUs such as `SKU-PHONE-01`. Weather is live from Open-Meteo.
