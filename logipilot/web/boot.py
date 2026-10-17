@@ -26,24 +26,34 @@ WARMING_HTML = (
 HOP_BY_HOP = {b"connection", b"keep-alive", b"transfer-encoding", b"upgrade", b"host"}
 
 
-async def _start_child() -> None:
-    _state["child"] = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "uvicorn", "logipilot.web.server:app",
-        "--host", "127.0.0.1", "--port", INTERNAL_PORT, "--no-server-header",
-        "--log-level", "warning",
-    )  # fmt: skip
+async def _supervise() -> None:
+    """Start the app process and restart it whenever it exits (self-healing front door)."""
     client = httpx.AsyncClient(base_url=f"http://127.0.0.1:{INTERNAL_PORT}", timeout=300)
     _state["client"] = client
-    while _state["child"].returncode is None:
-        try:
-            if (await client.get("/healthz", timeout=2)).status_code == 200:
-                _state["ready"] = True
-                print("[logipilot] app ready", flush=True)
-                return
-        except httpx.TransportError:
-            pass
-        await asyncio.sleep(0.5)
-    print(f"[logipilot] app process exited with {_state['child'].returncode}", flush=True)
+    restarts = 0
+    while True:
+        _state["ready"] = False
+        child = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "uvicorn", "logipilot.web.server:app",
+            "--host", "127.0.0.1", "--port", INTERNAL_PORT, "--no-server-header",
+            "--log-level", "warning",
+        )  # fmt: skip
+        _state["child"] = child
+        while child.returncode is None and not _state["ready"]:
+            try:
+                if (await client.get("/healthz", timeout=2)).status_code == 200:
+                    _state["ready"] = True
+                    print(f"[logipilot] app ready (restarts: {restarts})", flush=True)
+            except httpx.TransportError:
+                await asyncio.sleep(0.5)
+        code = await child.wait()
+        _state["ready"] = False
+        if _state.get("stopping"):
+            return
+        restarts += 1
+        hint = " (killed: likely out of memory)" if code in (-9, 137) else ""
+        print(f"[logipilot] app process exited with {code}{hint}; restarting", flush=True)
+        await asyncio.sleep(min(2 * restarts, 10))
 
 
 async def _respond(send, status: int, body: bytes, content_type: str) -> None:
@@ -84,9 +94,10 @@ async def app(scope, receive, send) -> None:
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
-                asyncio.create_task(_start_child())
+                asyncio.create_task(_supervise())
                 await send({"type": "lifespan.startup.complete"})
             elif message["type"] == "lifespan.shutdown":
+                _state["stopping"] = True
                 child = _state["child"]
                 if child and child.returncode is None:
                     child.terminate()
@@ -99,6 +110,10 @@ async def app(scope, receive, send) -> None:
         return await _respond(send, 200, b'{"ok": true}', "application/json")
     if _state["ready"]:
         return await _proxy(scope, receive, send)
+    return await _warming(scope, send)
+
+
+async def _warming(scope, send) -> None:
     if scope["path"].startswith("/api/"):
         body = b'{"detail": "LogiPilot is starting up; retry in a few seconds."}'
         return await _respond(send, 503, body, "application/json")
