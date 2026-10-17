@@ -9,6 +9,8 @@ if [ -n "${GCP_SA_KEY_JSON:-}" ]; then
   export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa.json
 fi
 PY="${PYTHON:-python}"
+# Hosts that inject their own port variable (Zoho Catalyst AppSail) override the default.
+export PORT="${X_ZOHO_CATALYST_LISTEN_PORT:-${PORT:-8000}}"
 # Shared secret between the agents and the internal tools API / MCP server, fresh per boot.
 export TOOLS_API_KEY="${TOOLS_API_KEY:-$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
 if [ "${SINGLE_PROCESS:-}" = "1" ]; then
