@@ -261,18 +261,36 @@ async def _firestore_ok() -> str:
     return "connected"
 
 
+@app.get("/healthz")
+async def healthz() -> dict:
+    """Liveness for the hosting platform: instant, no external calls."""
+    return {"ok": True}
+
+
+_health_cache: dict = {"at": 0.0, "body": None}
+
+
 @app.get("/api/health")
 async def health() -> dict:
+    """Dependency status for the chat page; probes run in parallel and are cached for 30 s."""
+    if _health_cache["body"] and time.monotonic() - _health_cache["at"] < 30:
+        return _health_cache["body"]
     mcp_health = config.MCP_URL.rsplit("/mcp", 1)[0] + "/health"
-    components = {
-        "tools_api": await _probe(lambda: _http_ok(f"{config.TOOLS_API_URL}/health")),
-        "mcp": await _probe(lambda: _http_ok(mcp_health)),
-        "jev": await _probe(_jev_ok),
-        "llm": await _probe(_llm_ok),
-        "firestore": await _probe(_firestore_ok),
+    probes = {
+        "tools_api": lambda: _http_ok(f"{config.TOOLS_API_URL}/health"),
+        "mcp": lambda: _http_ok(mcp_health),
+        "jev": _jev_ok,
+        "llm": _llm_ok,
+        "firestore": _firestore_ok,
     }
+    results = await asyncio.gather(
+        *(_probe(lambda f=f: asyncio.wait_for(f(), 4)) for f in probes.values())
+    )
+    components = dict(zip(probes, results, strict=True))
     ok = all(c["ok"] for c in components.values())
-    return {"status": "ok" if ok else "degraded", "components": components}
+    body = {"status": "ok" if ok else "degraded", "components": components}
+    _health_cache.update(at=time.monotonic(), body=body)
+    return body
 
 
 app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
