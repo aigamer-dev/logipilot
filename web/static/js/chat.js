@@ -106,7 +106,7 @@ function detail(env){
 /* health */
 const COMP=['tools_api','mcp','jev','llm','firestore'];const NAME={llm:'Gemma 4'};
 async function health(){const ul=$('#health');let j=null;
- try{j=mock?{components:Object.fromEntries(COMP.map(c=>[c,{ok:true,detail:'mock'}]))}:await (await fetch(window.LOGIPILOT_API+'/api/health')).json()}catch{}
+ try{j=noBackend?{components:Object.fromEntries(COMP.map(c=>[c,{ok:false,detail:'no backend (static preview)'}]))}:mock?{components:Object.fromEntries(COMP.map(c=>[c,{ok:true,detail:'mock'}]))}:await (await fetch(window.LOGIPILOT_API+'/api/health')).json()}catch{}
  ul.replaceChildren();COMP.forEach(c=>{const x=j&&j.components&&j.components[c];const li=el('li');
   const dot=el('i','dot'+(x?(x.ok?' ok':' bad'):''));li.title=(NAME[c]||c)+': '+(x?(x.ok?'ok':'down')+' - '+(x.detail||''):'unknown');
   li.append(dot,el('span',null,NAME[c]||c));li.setAttribute('aria-label',li.title);ul.append(li)})}
@@ -114,7 +114,7 @@ health();setInterval(health,30000);
 /* mock */
 // Static hosting with no API: say so plainly instead of inventing a shipment answer.
 function noBackendEnv(){return{session_id:sid,turn_id:'static-'+Date.now(),status:'FAILED',answer:'**This page is a static preview with no agent behind it**, so I can\'t answer yet: nothing you type here reaches LogiPilot.\n\nRun the real agent locally in two commands (it fetches the keys automatically):\n\n```bash\ngit clone https://github.com/aigamer-dev/logipilot && cd logipilot\ncp .env.judges .env && scripts/run_all.sh   # then open http://localhost:8000\n```\n\nSee the [README](https://github.com/aigamer-dev/logipilot#readme) for details.',contracts:[],trace:[],incidents:[],guardrail_flags:[],pii_vaulted:0,latency_ms:0}}
-function mockEnv(t){return{session_id:sid,turn_id:'mock-'+Date.now(),answer:`**LP1001** is delayed.\n\n- Last scan: Pune hub\n- New ETA: tomorrow 6 PM\n\nYou said: _${t.replace(/[<>]/g,'')}_ <img src=x onerror=alert(1)>`,status:'RELEASED',
+function mockEnv(t){return{session_id:sid,turn_id:'mock-'+Date.now(),answer:`**LP1001** is delayed.\n\n- Last scan: Pune hub\n- New ETA: tomorrow 6 PM\n\nYou said: _${t.replace(/[<>]/g,'')}_`,status:'RELEASED',
  contracts:[{contract_id:'c1',fragment:'Where is LP1001?',category:'delay',confidence:.93,status:'RELEASED',history:['ISSUED>ACCEPTED','ACCEPTED>EXECUTING','EXECUTING>VERIFIED','VERIFIED>RELEASED'].map(p=>({from:p.split('>')[0],to:p.split('>')[1],by:'jev',at:''})),attempts:1,verification:{resolves:.95,grounded:.9,policy_ok:1,passed:true},actions:[{action_id:'ACT-1',kind:'notify_customer'}]}],
  trace:[{step:'guardrails',detail:'clean',ms:12},{step:'specialist:delay',detail:'tracking lookup',ms:430}],incidents:[{component:'mcp',error:'timeout',recovery:'retried, ok'}],guardrail_flags:[],pii_vaulted:2,latency_ms:1420}}
 })();
