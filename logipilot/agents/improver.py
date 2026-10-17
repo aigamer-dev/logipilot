@@ -10,6 +10,7 @@ thumbs-down, or every AUTO_IMPROVE_EVERY_H hours when any new feedback arrived, 
 hour. Thumbs-up turns become regression eval cases, so the gate gets stricter as the app is used.
 """
 
+import uuid
 import asyncio
 import os
 import time
@@ -40,7 +41,8 @@ async def _eval_score(category: str, extra_rule: str | None) -> float:
     try:
         scores = []
         for case in cases:
-            sid = f"eval-{case['id']}-{rule_id or 'base'}"
+            # Fresh test- session per run: stored in test_* collections, never sharing history.
+            sid = f"test-eval-{case['id']}-{rule_id or 'base'}-{uuid.uuid4().hex[:6]}"
             env = await engine.turn(sid, case["message"], [])
             if "Reply **yes** to proceed" in env["answer"]:  # evals confirm queued actions
                 env = await engine.turn(sid, "yes", [])

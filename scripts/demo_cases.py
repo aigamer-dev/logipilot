@@ -86,9 +86,9 @@ def main(base: str) -> int:
     with httpx.Client(base_url=base, timeout=180) as client:
         for name, message, files, expected, group in CASES:
             sid = (
-                groups.setdefault(group, f"demo-{uuid.uuid4().hex[:12]}")
+                groups.setdefault(group, f"test-demo-{uuid.uuid4().hex[:12]}")
                 if group
-                else (f"demo-{uuid.uuid4().hex[:12]}")
+                else (f"test-demo-{uuid.uuid4().hex[:12]}")
             )
             uploads = [
                 (

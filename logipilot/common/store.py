@@ -1,5 +1,6 @@
 """Firestore access. Every case, trace, feedback item, learned rule, and eval run lives here."""
 
+import contextvars
 import os
 from datetime import UTC, datetime
 
@@ -22,27 +23,38 @@ class _LazyClient:
 
 db = _LazyClient()
 
+# Test traffic (session ids starting with "test-": demo cases, evals, probes) keeps its threads,
+# tickets and logs in test_* collections, so the ops desk and real history only hold real chats.
+# Seed data (shipments, hubs, lanes, inventory) and learning state stay shared.
+TEST_SESSION_PREFIX = "test-"
+TEST_SCOPED = {"turns", "cases", "tickets", "pii_vault", "incidents"}
+test_run: contextvars.ContextVar[bool] = contextvars.ContextVar("test_run", default=False)
+
+
+def _col(name: str):
+    return db.collection(f"test_{name}" if test_run.get() and name in TEST_SCOPED else name)
+
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
 async def get_doc(collection: str, doc_id: str) -> dict | None:
-    snap = await db.collection(collection).document(doc_id).get()
+    snap = await _col(collection).document(doc_id).get()
     return snap.to_dict() if snap.exists else None
 
 
 async def put_doc(collection: str, doc_id: str, data: dict) -> None:
-    await db.collection(collection).document(doc_id).set(data, merge=True)
+    await _col(collection).document(doc_id).set(data, merge=True)
 
 
 async def add_doc(collection: str, data: dict) -> str:
-    _, ref = await db.collection(collection).add({**data, "created_at": now()})
+    _, ref = await _col(collection).add({**data, "created_at": now()})
     return ref.id
 
 
 async def list_docs(collection: str, limit: int = 50, **where: object) -> list[dict]:
-    query = db.collection(collection)
+    query = _col(collection)
     for field, value in where.items():
         query = query.where(filter=firestore.FieldFilter(field, "==", value))
     return [{"id": s.id, **s.to_dict()} async for s in query.limit(limit).stream()]

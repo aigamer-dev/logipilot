@@ -315,3 +315,16 @@ def test_model_requests_never_carry_raw_pii(monkeypatch) -> None:
     asyncio.run(specialists._before_model(ctx, req))
     assert req.contents[0].parts[0].text == "call [PHONE_1] or [redacted]"
     assert "MG Road" not in req.config.system_instruction
+
+
+def test_test_sessions_write_to_test_collections() -> None:
+    from logipilot.common import store
+
+    assert store._col("turns").id == "turns"
+    token = store.test_run.set(True)
+    try:
+        assert store._col("turns").id == "test_turns"
+        assert store._col("tickets").id == "test_tickets"
+        assert store._col("shipments").id == "shipments"  # seed data stays shared
+    finally:
+        store.test_run.reset(token)

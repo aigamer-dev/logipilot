@@ -127,8 +127,12 @@ def _attachment_part(name: str, mime: str, data: bytes) -> tuple[types.Part | No
 
 
 async def turn(session_id: str, message: str, files: list[tuple[str, str, bytes]]) -> dict:
-    async with _locks[session_id]:
-        return await _turn(session_id, message, files)
+    scope = store.test_run.set(session_id.startswith(store.TEST_SESSION_PREFIX))
+    try:
+        async with _locks[session_id]:
+            return await _turn(session_id, message, files)
+    finally:
+        store.test_run.reset(scope)
 
 
 def _has_other_question(message: str, ticket_id: str) -> bool:
