@@ -19,6 +19,7 @@ from pypdf import PdfReader
 from logipilot.agents import guardrails, pii_vault, tickets
 from logipilot.agents.master import master_agent
 from logipilot.common import healing, jev, store
+from logipilot.common.secrets import redact_obj
 
 APP = "logipilot"
 # shortcut: sessions live in process memory (transcripts are also persisted to Firestore);
@@ -37,6 +38,18 @@ CUSTOMER_TOKEN = re.compile(r"\[CUST_(NAME|EMAIL|PHONE|ADDRESS)_\d+\]")
 INTERNAL_ID = re.compile(
     r"\b(?:contract\s+)?ct-[0-9a-f]{10}\b|\b\w+_(?:drafter|specialist)\b", re.I
 )
+
+
+OUTPUT_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+OUTPUT_PHONE = re.compile(r"(?<![\w-])(?:\+?\d{1,3}[\s-]?)?[6-9]\d{4}[\s-]?\d{5}\b")
+
+
+def _redact_foreign_pii(text: str, vault: dict[str, str]) -> str:
+    """Output filter: an email or phone number the user did not type never leaves the system."""
+    own = {v for k, v in vault.items() if not k.startswith("[CUST_")}
+    for pattern in (OUTPUT_EMAIL, OUTPUT_PHONE):
+        text = pattern.sub(lambda m: m.group(0) if m.group(0) in own else "[redacted]", text)
+    return text
 
 
 def _clean_answer(text: str) -> str:
@@ -212,8 +225,9 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
                 raise RuntimeError("master produced no envelope")
             tokenized_answer = envelope["answer"]
             vault = await pii_vault.load(session_id)  # tools may have vaulted customer details
-            envelope["answer"] = _clean_answer(
-                pii_vault.detokenize(tokenized_answer, vault, customer=False)
+            envelope["answer"] = _redact_foreign_pii(
+                _clean_answer(pii_vault.detokenize(tokenized_answer, vault, customer=False)),
+                vault,
             )
             if ticket_match:
                 ticket = await tickets.get(ticket_match.group(0), session_id)
@@ -234,6 +248,7 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
             pii_vaulted=pii_count,
             latency_ms=int((time.monotonic() - started) * 1000),
         )
+        envelope = redact_obj(envelope)  # no key value can ride out in an answer or trace
         # Stored with the tokenized message only; the vault is the single home of raw PII.
         await store.put_doc(
             "turns",

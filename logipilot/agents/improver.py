@@ -4,15 +4,31 @@
       -> promote if the score does not regress, else reject (kept for audit)
 
 Stop rules: at most one promotion per run, at most MAX_ACTIVE_RULES active rules in total.
+
+It runs automatically (`learning_loop`, started with the server): after AUTO_IMPROVE_NEGATIVES new
+thumbs-down, or every AUTO_IMPROVE_EVERY_H hours when any new feedback arrived, at most once an
+hour. Thumbs-up turns become regression eval cases, so the gate gets stricter as the app is used.
 """
 
+import asyncio
+import os
+import time
+
 from logipilot.agents import engine
-from logipilot.common import config, llm, store
+from logipilot.common import config, healing, llm, store
+
+MAX_EVAL_CASES = 5  # per category per gate run, newest first: bounds cost and time
+AUTO_NEGATIVES = int(os.getenv("AUTO_IMPROVE_NEGATIVES", "3"))
+AUTO_EVERY_S = float(os.getenv("AUTO_IMPROVE_EVERY_H", "6")) * 3600
+CHECK_EVERY_S = 600
+MIN_GAP_S = 3600
+_running = asyncio.Lock()
 
 
 async def _eval_score(category: str, extra_rule: str | None) -> float:
     """Mean verifier score of a category's eval cases, optionally with a candidate rule."""
-    cases = await store.list_docs("eval_cases", category=category)
+    cases = await store.list_docs("eval_cases", limit=200, category=category)
+    cases = sorted(cases, key=lambda c: c.get("created_at", ""), reverse=True)[:MAX_EVAL_CASES]
     if not cases:
         return 0.0
     rule_id = None
@@ -36,7 +52,72 @@ async def _eval_score(category: str, extra_rule: str | None) -> float:
             await store.put_doc("learned_rules", rule_id, {"status": "candidate"})
 
 
-async def improve() -> dict:
+async def improve(trigger: str = "manual") -> dict:
+    """One improvement cycle; concurrent calls are refused rather than run twice."""
+    if _running.locked():
+        return {"stopped": "a cycle is already running", "promoted": None, "rejected": []}
+    async with _running:
+        result = await _improve()
+    await store.put_doc(
+        "learning_state", "main", {"last_run_at": store.now(), "last_trigger": trigger,
+                                   "last_result": result},
+    )  # fmt: skip
+    return result
+
+
+async def add_regression_case(turn: dict, turn_id: str) -> int:
+    """A thumbs-up turn becomes eval cases: each resolved, non-chat intent is a regression test."""
+    added = 0
+    for i, c in enumerate(turn.get("contracts", [])):
+        if c.get("status") == "RELEASED" and c.get("category") not in (None, "general"):
+            await store.put_doc(
+                "eval_cases", f"fb-{turn_id}-{i}",
+                {"category": c["category"], "message": c["fragment"], "source": "user_feedback",
+                 "expected_actions": [a["kind"] for a in c.get("actions", [])],
+                 "created_at": store.now()},
+            )  # fmt: skip
+            added += 1
+    return added
+
+
+async def _due() -> str | None:
+    """Why a cycle should run now, or None. Counts feedback that arrived since the last run."""
+    state = await store.get_doc("learning_state", "main") or {}
+    last = state.get("last_run_at", "")
+    if last and time.time() - _epoch(last) < MIN_GAP_S:
+        return None
+    fresh = [f for f in await store.list_docs("feedback", limit=500)
+             if f.get("created_at", "") > last]  # fmt: skip
+    negatives = sum(f.get("rating") == -1 for f in fresh)
+    if negatives >= AUTO_NEGATIVES:
+        return f"{negatives} new thumbs-down"
+    if fresh and (not last or time.time() - _epoch(last) >= AUTO_EVERY_S):
+        return f"scheduled ({len(fresh)} new feedback)"
+    return None
+
+
+def _epoch(iso: str) -> float:
+    from datetime import datetime
+
+    return datetime.fromisoformat(iso).timestamp()
+
+
+async def learning_loop() -> None:
+    """Background task: checks every 10 minutes and runs a cycle when one is due."""
+    while True:
+        await asyncio.sleep(CHECK_EVERY_S)
+        try:
+            reason = await _due()
+            if reason:
+                print(f"[logipilot] learning cycle starting: {reason}", flush=True)
+                result = await improve(trigger=reason)
+                print(f"[logipilot] learning cycle done: promoted={bool(result.get('promoted'))}",
+                      flush=True)  # fmt: skip
+        except Exception as exc:  # noqa: BLE001 - the loop must survive any single failure
+            await healing.record("learning_loop", exc, "skipped this cycle; will retry")
+
+
+async def _improve() -> dict:
     active = await store.list_docs("learned_rules", limit=500, status="active")
     if len(active) >= config.MAX_ACTIVE_RULES:
         return {"stopped": "active rule cap reached", "promoted": None, "rejected": []}

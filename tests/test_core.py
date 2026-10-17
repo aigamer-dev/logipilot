@@ -133,3 +133,54 @@ def test_customer_pii_from_db_is_vaulted_before_the_model_sees_it(monkeypatch) -
             assert secret not in dumped
         assert "BlueDart" in dumped and "[CUST_EMAIL_1]" in dumped
     assert ctx.state["pii_vault"]["[CUST_EMAIL_1]"] == "rohan@example.com"
+
+
+def test_redact_masks_known_secret_values_and_key_shapes(monkeypatch) -> None:
+    from logipilot.common.secrets import redact, redact_obj
+
+    monkeypatch.setenv("OLLAMA_KEY", "ollama-super-secret-value-123")
+    text = (
+        "401 for https://api.example/v1?key=AIzaSyDUMMYDUMMYDUMMYDUMMYDUMMY12345 "
+        "auth=ollama-super-secret-value-123 jev=apikey_1234567890abcdefghijklmnop"
+    )
+    out = redact(text)
+    for leaked in ("ollama-super-secret-value-123", "AIzaSy", "apikey_1234567890"):
+        assert leaked not in out
+    assert redact_obj({"a": [text]})["a"][0] == out
+    assert redact("Where is LP1001?") == "Where is LP1001?"
+
+
+def test_rate_limiter_blocks_after_limit_and_reports_wait() -> None:
+    from logipilot.web.security import RateLimiter
+
+    limiter = RateLimiter(limit=2, window=60)
+    assert limiter.retry_after("s") == 0 and limiter.retry_after("s") == 0
+    assert limiter.retry_after("s") > 0
+    assert limiter.retry_after("other") == 0
+
+
+def test_learning_loop_triggers_on_new_negatives_and_respects_min_gap(monkeypatch) -> None:
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from logipilot.agents import improver
+
+    now = datetime.now(UTC)
+    iso = lambda d: (now - d).isoformat()  # noqa: E731
+    state = {"last_run_at": iso(timedelta(hours=2))}
+    feedback = [{"rating": -1, "created_at": iso(timedelta(minutes=m))} for m in (1, 2, 3)]
+
+    async def get_doc(collection, doc_id):
+        return state
+
+    async def list_docs(collection, limit=50, **where):
+        return feedback
+
+    monkeypatch.setattr(improver.store, "get_doc", get_doc)
+    monkeypatch.setattr(improver.store, "list_docs", list_docs)
+    assert "3 new thumbs-down" in asyncio.run(improver._due())
+    state["last_run_at"] = iso(timedelta(minutes=10))  # ran recently: hourly cap applies
+    assert asyncio.run(improver._due()) is None
+    state["last_run_at"] = iso(timedelta(hours=2))
+    feedback[:] = feedback[:1]  # one thumbs-down, last run 2 h ago: not yet due
+    assert asyncio.run(improver._due()) is None

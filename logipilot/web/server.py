@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,6 +18,10 @@ from pydantic import BaseModel, Field
 
 from logipilot.agents import engine, improver, tickets
 from logipilot.common import config, healing, jev, llm, store
+from logipilot.common.secrets import install_log_filter
+from logipilot.web import security
+
+install_log_filter()
 
 STATIC = Path(__file__).resolve().parents[2] / "web" / "static"
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -50,13 +54,23 @@ SINGLE_PROCESS = os.getenv("SINGLE_PROCESS") == "1"
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not SINGLE_PROCESS:
-        yield
-        return
-    from logipilot.mcp_server.main import mcp
+    # The feedback loop runs by itself in the background (AUTO_IMPROVE=0 turns it off).
+    learning = (
+        asyncio.create_task(improver.learning_loop())
+        if os.getenv("AUTO_IMPROVE", "1") != "0"
+        else None
+    )
+    try:
+        if not SINGLE_PROCESS:
+            yield
+            return
+        from logipilot.mcp_server.main import mcp
 
-    async with mcp.session_manager.run():
-        yield
+        async with mcp.session_manager.run():
+            yield
+    finally:
+        if learning:
+            learning.cancel()
 
 
 # No public /docs or schema: the README documents the API.
@@ -94,6 +108,14 @@ INTERNAL_PREFIXES = ("/tools", "/mcp-server")
 
 
 @app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in security.SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
+@app.middleware("http")
 async def internal_only(request, call_next):
     """The mounted tools API and MCP server serve this process only, never the internet.
 
@@ -119,12 +141,22 @@ if SINGLE_PROCESS:
 
 @app.post("/api/chat")
 async def chat(
+    request: Request,
     session_id: str = Form(..., pattern=SESSION_ID),
     message: str = Form("", max_length=4000),
     files: list[UploadFile] = File(default_factory=list),
 ) -> dict:
     if not message.strip() and not files:
         raise HTTPException(422, "Send a message or an attachment.")
+    ip = security.client_ip(request)
+    wait = security.per_ip.retry_after(ip) or security.per_session.retry_after(session_id)
+    if wait:
+        await security.record("rate_limited", request, session_id=session_id)
+        raise HTTPException(
+            429,
+            "You're sending messages too quickly; please wait a moment.",
+            headers={"Retry-After": str(wait)},
+        )
     if len(files) > MAX_FILES:
         raise HTTPException(413, f"At most {MAX_FILES} attachments per message.")
     uploads = []
@@ -136,7 +168,13 @@ async def chat(
             raise HTTPException(413, f"{f.filename} is larger than 8 MB.")
         uploads.append((f.filename or "file", f.content_type or "application/octet-stream", data))
     try:
-        return await asyncio.wait_for(engine.turn(session_id, message, uploads), TURN_TIMEOUT_S)
+        envelope = await asyncio.wait_for(engine.turn(session_id, message, uploads), TURN_TIMEOUT_S)
+        if envelope.get("guardrail_flags"):
+            await security.record(
+                "guardrail_refusal", request, session_id=session_id,
+                flags=envelope["guardrail_flags"],
+            )  # fmt: skip
+        return envelope
     except Exception as exc:  # noqa: BLE001 - the chat must always get an answer, never a 500
         timed_out = isinstance(exc, TimeoutError)
         await healing.record("turn", exc, "returned a safe FAILED answer to the user")
@@ -173,7 +211,9 @@ async def feedback(body: Feedback) -> dict:
     if not turn or turn.get("session_id") != body.session_id:
         raise HTTPException(404, "Unknown turn.")
     await store.put_doc("feedback", body.turn_id, {**body.model_dump(), "created_at": store.now()})
-    return {"ok": True}
+    # Thumbs-up turns join the eval set, so future rules must keep them working.
+    added = await improver.add_regression_case(turn, body.turn_id) if body.rating == 1 else 0
+    return {"ok": True, "regression_cases_added": added}
 
 
 class TicketReply(BaseModel):
@@ -224,9 +264,41 @@ async def ticket_reply(
 
 @app.post("/api/improve")
 async def improve(x_admin_token: str = Header(default="")) -> dict:
-    """Run one feedback-loop cycle. Admin only: it changes agent behaviour for everyone."""
+    """Run one feedback-loop cycle now. Admin only: it changes agent behaviour for everyone."""
     _require_admin(x_admin_token)
-    return await improver.improve()
+    return await improver.improve(trigger="admin")
+
+
+@app.get("/api/learning")
+async def learning() -> dict:
+    """Public view of what the system has learned and the evidence for each rule."""
+    rules = await store.list_docs("learned_rules", limit=200, status="active")
+    runs = await store.list_docs("eval_runs", limit=200)
+    cases = await store.list_docs("eval_cases", limit=1000)
+    per_category: dict[str, int] = {}
+    for c in cases:
+        per_category[c.get("category", "?")] = per_category.get(c.get("category", "?"), 0) + 1
+    keep = ("id", "category", "rule", "baseline", "score", "created_at")
+    return {
+        "active_rules": [{k: r.get(k) for k in keep} for r in rules],
+        "recent_runs": [
+            {k: r.get(k) for k in (*keep, "decision")}
+            for r in sorted(runs, key=lambda r: r.get("created_at", ""), reverse=True)[:20]
+        ],
+        "eval_cases": per_category,
+        "regression_cases_from_feedback": sum(c.get("source") == "user_feedback" for c in cases),
+        "state": await store.get_doc("learning_state", "main") or {},
+    }
+
+
+@app.post("/api/rules/{rule_id}/revoke")
+async def revoke_rule(rule_id: str, x_admin_token: str = Header(default="")) -> dict:
+    """A human can switch off any learned rule; it stays on record as revoked."""
+    _require_admin(x_admin_token)
+    if not await store.get_doc("learned_rules", rule_id):
+        raise HTTPException(404, "Unknown rule.")
+    await store.put_doc("learned_rules", rule_id, {"status": "revoked", "revoked_at": store.now()})
+    return {"ok": True}
 
 
 async def _probe(fn) -> dict:

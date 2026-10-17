@@ -7,7 +7,9 @@ PY="${PYTHON:-python}"
 export PORT="${PORT:-8000}"  # hosts such as SnapDeploy inject PORT
 # Shared secret between the agents and the internal tools API / MCP server, fresh per boot.
 export TOOLS_API_KEY="${TOOLS_API_KEY:-$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
-if [ "${SINGLE_PROCESS:-}" = "1" ]; then
+# Single-process is the default (same as the container image); SINGLE_PROCESS=0 runs three services.
+if [ "${SINGLE_PROCESS:-1}" = "1" ]; then
+  export SINGLE_PROCESS=1
   # The app itself runs on a private loopback port behind the fast-start front door (web/boot.py).
   export APP_INTERNAL_PORT="${APP_INTERNAL_PORT:-8001}"
   export TOOLS_API_URL="http://127.0.0.1:${APP_INTERNAL_PORT}/tools"

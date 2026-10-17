@@ -9,6 +9,7 @@ from google.adk.models.lite_llm import LiteLlm
 from logipilot.common import config
 
 litellm.drop_params = True
+litellm.suppress_debug_info = True  # its debug banners can echo request details
 
 
 def adk_model(name: str | None = None) -> LiteLlm:

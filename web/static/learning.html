@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LogiPilot learning</title><meta name="description" content="What LogiPilot has learned from feedback, and the evidence for each rule.">
+<meta name="theme-color" content="#05060a">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/learning.css">
+</head><body>
+<header class="lp-head"><a href="index.html" class="brand">Logi<span>Pilot</span></a><a class="btn sm" href="chat.html">Back to chat</a></header>
+<main class="lp-main" id="main">
+<h1>What I learned</h1>
+<p class="lead">LogiPilot improves itself from your 👍 and 👎. A background cycle proposes one rule from recent failures, replays the eval set with and without it, and keeps the rule only if the verifier score does not drop. Thumbs-up answers become new eval cases, so every rule has to keep them working.</p>
+<section aria-labelledby="h-state"><h2 id="h-state">Loop status</h2><div id="state" class="cards" aria-live="polite">Loading…</div></section>
+<section aria-labelledby="h-rules"><h2 id="h-rules">Active rules</h2><div id="rules" aria-live="polite"></div></section>
+<section aria-labelledby="h-runs"><h2 id="h-runs">Recent decisions</h2><div id="runs"></div></section>
+<section aria-labelledby="h-evals"><h2 id="h-evals">Eval set</h2><div id="evals"></div></section>
+</main>
+<script src="js/learning.js"></script>
+</body></html>

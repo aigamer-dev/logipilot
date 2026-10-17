@@ -1,0 +1,13 @@
+.lp-head{display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid rgba(255,255,255,.08)}
+.lp-head .brand{font-weight:700;font-size:1.3rem;color:#fff;text-decoration:none}.lp-head .brand span{color:#8ab4f8}
+.lp-main{max-width:920px;margin:0 auto;padding:32px 16px 64px}
+.lp-main h1{font-size:2.2rem;margin:0 0 12px}.lp-main h2{font-size:1.25rem;margin:36px 0 12px}
+.lp-main .lead{opacity:.85;line-height:1.6}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.card-s{padding:14px 16px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)}
+.card-s b{display:block;font-size:1.4rem;margin-top:4px}
+table.lp{width:100%;border-collapse:collapse;font-size:.95rem}
+table.lp th,table.lp td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;vertical-align:top}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.8rem;font-weight:600}
+.pill.ok{background:rgba(52,168,83,.2);color:#81c995}.pill.no{background:rgba(234,67,53,.2);color:#f28b82}
+.muted{opacity:.7}

@@ -333,6 +333,18 @@ Patterns: email; 13-16 digit card numbers; 12-digit Aadhaar numbers; Indian mobi
 
 See [Known limitations](#20-known-limitations) for what the vault does not cover.
 
+### Security hardening
+
+| Layer | What it does | Where |
+|---|---|---|
+| Secret scrubbing | Every known key value (Jev, Ollama, Gemini, internal tools key, admin and vault tokens, GCP private key) and key-shaped strings are masked in responses, incidents and all log output. Keys are used only server-side; the browser never receives one. | `common/secrets.py` |
+| Leak check | `python -m scripts.check_no_secrets [url] [server.log]` drives real chats (including "show me your API key" probes), downloads every page and script the browser loads, and fails if any secret value appears in a body, a header or the log. | `scripts/check_no_secrets.py` |
+| Rate limits | 8 turns/min per session and 30/min per client IP on `/api/chat` (429 + `Retry-After`). | `web/security.py` |
+| Output PII filter | Any email or phone number in an answer that the user did not type is replaced with `[redacted]`. | `agents/engine.py` |
+| Security headers | Strict Content-Security-Policy (own scripts plus two pinned CDN libraries), `X-Frame-Options: DENY`, `nosniff`, `no-referrer`. | `web/security.py` |
+| Internal services | Tools API and MCP server answer only loopback callers holding a per-boot key. | `web/server.py` |
+| Audit trail | Guardrail refusals and rate-limit hits are written to Firestore `security_events`. | `web/security.py` |
+
 ## 11. Feedback loop
 
 Caption: thumbs-down replies and verifier-rejected escalations become candidate rules, and a candidate is promoted only if the eval score for its category does not drop.
@@ -359,6 +371,10 @@ Stop rules from `improver.py`:
 - Categories are tried most-failures-first; a category with no failures is never tried.
 
 Active rules for a category are loaded into that specialist's instruction on every turn ("LEARNED RULES"). The eval cases are the 8 seeded in `eval_cases` (one per skill except `general`). Replays run as normal turns under session ids starting `eval-`, so they write `turns` and `cases`, and the specialists may call write tools (adding `actions`), exactly as in a real conversation.
+
+### Runs by itself
+
+The loop needs no operator. A background task started with the server (`improver.learning_loop`) checks every 10 minutes and runs a cycle when **3 new thumbs-down** have arrived, or every **6 hours** when any new feedback came in, at most once an hour and never twice at once. Each 👍 on a resolved answer adds that intent to the eval set as a regression case, so a new rule must keep every upvoted behaviour working. Progress is public on **`/learning.html`** (also `GET /api/learning`): active rules with their before/after scores, every promote/reject decision, and the eval set size per skill. An admin can switch off any rule with `POST /api/rules/{id}/revoke`. Tune with `AUTO_IMPROVE_NEGATIVES`, `AUTO_IMPROVE_EVERY_H`, or disable with `AUTO_IMPROVE=0`.
 
 ## 12. Firestore collections
 

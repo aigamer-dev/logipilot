@@ -11,6 +11,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from logipilot.common import store
+from logipilot.common.secrets import redact
 
 # Incidents for the turn being processed; the engine resets this per turn.
 turn_incidents: contextvars.ContextVar[list[dict] | None] = contextvars.ContextVar(
@@ -19,7 +20,7 @@ turn_incidents: contextvars.ContextVar[list[dict] | None] = contextvars.ContextV
 
 
 async def record(component: str, error: Exception | str, recovery: str) -> None:
-    incident = {"component": component, "error": str(error)[:300], "recovery": recovery}
+    incident = {"component": component, "error": redact(error)[:300], "recovery": recovery}
     if (bucket := turn_incidents.get()) is not None:
         bucket.append(incident)
     try:
