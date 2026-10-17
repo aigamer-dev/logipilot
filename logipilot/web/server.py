@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from logipilot.agents import engine, improver, tickets
+from logipilot.agents import engine, improver, pii_vault, tickets
 from logipilot.common import config, healing, jev, llm, store
 from logipilot.common.secrets import install_log_filter
 from logipilot.web import security
@@ -245,6 +245,36 @@ async def ticket_status(ticket_id: str, session_id: str) -> dict:
             "updated_at",
         )
     }
+
+
+@app.get("/api/admin/tickets")
+async def admin_tickets(status: str = "open", x_admin_token: str = Header(default="")) -> dict:
+    """Operations queue for ops.html: tickets with the AI's case notes, PII masked."""
+    _require_admin(x_admin_token)
+    if status not in {"open", "answered", "closed", "all"}:
+        raise HTTPException(422, "status must be open, answered, closed or all.")
+    where = {} if status == "all" else {"status": status}
+    # shortcut: newest 100 sorted in memory; add a Firestore index on created_at past that.
+    rows = sorted(
+        await store.list_docs("tickets", limit=100, **where),
+        key=lambda t: t.get("created_at", ""),
+        reverse=True,
+    )
+    out = []
+    for t in rows:
+        vault = await pii_vault.load(t["session_id"])
+        case = await store.get_doc("cases", t.get("contract_id") or "") or {}
+        out.append(
+            {
+                **{k: t.get(k) for k in ("ticket_id", "status", "category", "reason",
+                                         "tracking_ids", "human_reply", "created_at")},
+                "request": pii_vault.mask_text(t.get("fragment") or "", vault),
+                "ai_answer": pii_vault.mask_text(case.get("answer") or "", vault),
+                "actions": case.get("actions") or [],
+                "verification": case.get("verification"),
+            }
+        )  # fmt: skip
+    return {"tickets": out}
 
 
 @app.post("/api/tickets/{ticket_id}/reply")
