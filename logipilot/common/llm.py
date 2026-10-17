@@ -12,7 +12,11 @@ litellm.drop_params = True
 
 
 def adk_model(name: str | None = None) -> LiteLlm:
-    """An ADK model handle for an Ollama cloud model (primary unless a name is given)."""
+    """An ADK model handle: Ollama cloud by default, Gemini when the name starts with "gemini"."""
+    if (name or "").startswith("gemini"):
+        return LiteLlm(
+            model=f"gemini/{name}", api_key=config.GEMINI_API_KEY, temperature=0, num_retries=2
+        )
     return LiteLlm(
         model=f"ollama_chat/{name or config.LLM_MODEL}",
         api_base=config.OLLAMA_API_BASE,
@@ -23,7 +27,24 @@ def adk_model(name: str | None = None) -> LiteLlm:
 
 
 async def complete_json(prompt: str, model: str | None = None) -> dict:
-    """One JSON-returning completion, used where an ADK agent would be overkill."""
+    """One JSON-returning completion: Ollama first, the free Gemini key if Ollama fails."""
+    try:
+        return await _complete_ollama(prompt, model)
+    except Exception:
+        if not config.GEMINI_API_KEY:
+            raise
+        resp = await litellm.acompletion(
+            model=f"gemini/{config.GEMINI_FALLBACK_MODEL}",
+            api_key=config.GEMINI_API_KEY,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30,
+            num_retries=1,
+        )
+        return parse_json(resp.choices[0].message.content or "")
+
+
+async def _complete_ollama(prompt: str, model: str | None = None) -> dict:
     resp = await litellm.acompletion(
         model=f"ollama_chat/{model or config.LLM_MODEL}",
         api_base=config.OLLAMA_API_BASE,

@@ -704,6 +704,8 @@ The Makefile's `fmt` and `lint` targets also list a `frontend` directory that do
 
 ## 20. Known limitations
 
+- **The Gemini fallback is a free-tier key.** When Ollama cloud is down, agents heal onto `gemini-flash-latest` (key from a billing-free Google project). Its per-minute quota covers a short outage at demo traffic; a sustained outage hits the free-tier limit (HTTP 429), and the turn then fails safely with a ticket.
+
 - **Sessions are in memory.** ADK conversation state uses `InMemorySessionService`: it is lost on restart and not shared between instances, so run a single instance (on Cloud Run, for example `--max-instances 1`). Turns, cases and the PII vault are persisted to Firestore, but they are not reloaded into a new session.
 - **Voice is browser dictation, not audio to the model.** The mic button uses the browser's Web Speech API (`SpeechRecognition`) to put text in the input box; support depends on the browser. Uploaded audio files are not transcribed or sent to the model.
 - **The Jev fallback uses an LLM.** When Jev is unreachable (or `TYPESAFE_API_KEY` is missing), triage, the hard-stop inputs and the verifier are answered by the same Ollama model that writes the replies, with no calibrated probabilities and no independence from the drafter. The answers are marked `llm_fallback` in the data, but the thresholds apply unchanged.

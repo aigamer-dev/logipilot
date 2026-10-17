@@ -1,6 +1,8 @@
 // LogiPilot key vault: hands the app its API keys at startup, so no real key lives in the repo.
 // One access token (VAULT_TOKEN) is shared with judges; rotate or delete it to cut access off.
-const KEYS = ["TYPESAFE_API_KEY", "OLLAMA_KEY", "GCP_SA_KEY_JSON", "GOOGLE_CLOUD_PROJECT"];
+const KEYS = [
+  "TYPESAFE_API_KEY", "OLLAMA_KEY", "GEMINI_API_KEY", "GCP_SA_KEY_JSON", "GOOGLE_CLOUD_PROJECT",
+];
 
 function safeEqual(a, b) {
   // Constant-time comparison so the token can't be guessed byte by byte from timing.

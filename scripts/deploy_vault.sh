@@ -11,6 +11,7 @@ cd vault
 printf '%s' "$TOKEN" | $W secret put VAULT_TOKEN >/dev/null
 printf '%s' "$TYPESAFE_API_KEY" | $W secret put TYPESAFE_API_KEY >/dev/null
 printf '%s' "$OLLAMA_KEY" | $W secret put OLLAMA_KEY >/dev/null
+printf '%s' "$GEMINI_API_KEY" | $W secret put GEMINI_API_KEY >/dev/null
 printf '%s' "$GOOGLE_CLOUD_PROJECT" | $W secret put GOOGLE_CLOUD_PROJECT >/dev/null
 $W secret put GCP_SA_KEY_JSON < "$SA_KEY" >/dev/null
 URL="$($W deploy 2>&1 | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)"

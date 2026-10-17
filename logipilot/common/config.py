@@ -38,6 +38,9 @@ OLLAMA_API_BASE = os.getenv("OLLAMA_API_BASE", "https://ollama.com")
 OLLAMA_KEY = os.getenv("OLLAMA_KEY") or os.getenv("OLLAMA_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemma4:31b")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gpt-oss:20b")
+# Last resort when Ollama cloud is down: Gemini on the free tier (key from a billing-free project).
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-flash-latest")
 
 TOOLS_API_URL = os.getenv("TOOLS_API_URL", "http://localhost:8090")
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8091/mcp")

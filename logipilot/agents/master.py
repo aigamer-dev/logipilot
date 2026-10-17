@@ -437,26 +437,49 @@ class MasterOrchestrator(BaseAgent):
 
         Yields (event, ok) pairs; the final pair is (None, success).
         """
-        plans = []
-        if not mcp_breaker.is_open:
-            plans.append((config.LLM_MODEL, True))
-        plans += [(config.LLM_MODEL, False), (config.LLM_FALLBACK_MODEL, False)]
+        models = [config.LLM_MODEL, config.LLM_FALLBACK_MODEL]
+        if config.GEMINI_API_KEY:
+            models.append(config.GEMINI_FALLBACK_MODEL)
+        # A model that just failed is skipped for a while, so later calls go straight to one
+        # that works instead of re-walking the whole chain (the last model is always tried).
+        live = [m for m in models if not _model_breaker(m).is_open] or models[-1:]
+        plans = [(live[0], True)] if not mcp_breaker.is_open else []
+        plans += [(m, False) for m in live]
         for model_name, via_mcp in plans:
             agent = build_agents(model_name, via_mcp, bool(ctx.session.state.get("read_only")))[key]
             try:
                 async for event in agent.run_async(ctx):
                     yield event, True
+                _model_breaker(model_name).success()
                 if via_mcp:
                     mcp_breaker.success()
                 yield None, True
                 return
             except Exception as exc:  # noqa: BLE001 - every failure gets a recovery path below
-                if via_mcp:
+                if _is_model_error(exc):
+                    breaker = _model_breaker(model_name)
+                    # A rejected key won't fix itself in 30 s; keep that model out for 10 min.
+                    breaker.cooldown = 600.0 if "Authentication" in type(exc).__name__ else 30.0
+                    breaker.failure()
+                    await healing.record(f"llm:{model_name}", exc, "retrying with the next model")
+                elif via_mcp:
                     mcp_breaker.failure()
                     await healing.record("mcp", exc, "switched tools to the direct REST API")
                 else:
-                    await healing.record(f"llm:{model_name}", exc, "retrying with the next model")
+                    await healing.record(f"agent:{key}", exc, "retrying with the next model")
         yield None, False
+
+
+_model_breakers: dict[str, healing.CircuitBreaker] = {}
+
+
+def _model_breaker(model: str) -> healing.CircuitBreaker:
+    return _model_breakers.setdefault(model, healing.CircuitBreaker(f"llm:{model}", threshold=1))
+
+
+def _is_model_error(exc: Exception) -> bool:
+    """LLM provider failures (auth, rate limit, outage) come from litellm, not from MCP."""
+    return type(exc).__module__.startswith("litellm") or "litellm" in str(exc).lower()
 
 
 def _user_text(ctx: InvocationContext) -> str:
