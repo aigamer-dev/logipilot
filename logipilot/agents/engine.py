@@ -1,6 +1,6 @@
 """Chat engine: one conversational turn end to end.
 
-guardrails -> PII vault -> attachments to parts -> ADK Runner(master) -> detokenize -> persist
+PII vault -> input guardrails -> ADK Runner(master) -> output guardrail (mask) -> persist
 """
 
 import asyncio
@@ -10,6 +10,7 @@ import re
 import time
 import uuid
 
+from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -34,34 +35,59 @@ MAX_TEXT_CHARS = 8000
 TRACKING_ID = re.compile(r"\b[Ll]\s*[Pp][\s-]*([0-9Oo]{4})\b")
 
 
-CUSTOMER_TOKEN = re.compile(r"\[CUST_(NAME|EMAIL|PHONE|ADDRESS)_\d+\]")
+CUSTOMER_TOKEN = re.compile(r"\[CUST_(NAME|EMAIL|PHONE|ADDRESS|CARD|AADHAAR)_\d+\]")
 INTERNAL_ID = re.compile(
     r"\b(?:contract\s+)?ct-[0-9a-f]{10}\b|\b\w+_(?:drafter|specialist)\b", re.I
 )
 
 
-OUTPUT_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-OUTPUT_PHONE = re.compile(r"(?<![\w-])(?:\+?\d{1,3}[\s-]?)?[6-9]\d{4}[\s-]?\d{5}\b")
-
-
-def _redact_foreign_pii(text: str, vault: dict[str, str]) -> str:
-    """Output filter: an email or phone number the user did not type never leaves the system."""
-    own = {v for k, v in vault.items() if not k.startswith("[CUST_")}
-    for pattern in (OUTPUT_EMAIL, OUTPUT_PHONE):
-        text = pattern.sub(lambda m: m.group(0) if m.group(0) in own else "[redacted]", text)
-    return text
-
-
 def _clean_answer(text: str) -> str:
     """Last-mile scrub: no vault tokens, internal ids or agent names reach the customer."""
     text = CUSTOMER_TOKEN.sub(
-        lambda m: "there" if m.group(1) == "NAME" else "the contact details on file", text
+        lambda m: (
+            "there"
+            if m.group(1) == "NAME"
+            else f"the {m.group(1).lower()} on file (hidden for privacy)"
+        ),
+        text,
     )
     return INTERNAL_ID.sub("our team", text)
 
 
 def normalize_ids(text: str) -> str:
     return TRACKING_ID.sub(lambda m: "LP" + m.group(1).replace("O", "0").replace("o", "0"), text)
+
+
+async def _restore_history(session_id: str) -> None:
+    """Rebuild a session lost to a restart from its persisted turns, so follow-ups keep context.
+
+    Turns are stored tokenized, so the rebuilt history carries vault tokens, never PII.
+    """
+    if await sessions.get_session(app_name=APP, user_id=session_id, session_id=session_id):
+        return
+    # shortcut: last 50 turns, sorted in memory; add a Firestore index on (session_id, created_at)
+    # if conversations get longer than that.
+    turns = sorted(
+        await store.list_docs("turns", limit=50, session_id=session_id),
+        key=lambda t: t.get("created_at", ""),
+    )[-10:]
+    session = await sessions.create_session(app_name=APP, user_id=session_id, session_id=session_id)
+    for t in turns:
+        for author, role, text in (
+            ("user", "user", t.get("message")),
+            ("master", "model", t.get("answer")),
+        ):
+            if text and text != "[tokenized]":
+                # Re-vault anyway: ticket replies written by staff are stored as typed.
+                text, _ = await pii_vault.tokenize(session_id, text)
+                await sessions.append_event(
+                    session,
+                    Event(
+                        author=author,
+                        invocation_id=t.get("turn_id", "restored"),
+                        content=types.Content(role=role, parts=[types.Part(text=text)]),
+                    ),
+                )
 
 
 # One turn at a time per session: parallel turns would interleave one session's state.
@@ -167,11 +193,20 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
             if text:
                 texts.append(text)
         raw = normalize_ids("\n\n".join([message, *texts]).strip()) or "(see attachment)"
+        # Vault PII first: from here on no model (Jev included) sees a real value.
+        t0 = time.monotonic()
+        safe_text, pii_count = await pii_vault.tokenize(session_id, raw)
+        vault = await pii_vault.load(session_id)
+        pii_step = {
+            "step": "pii_vault",
+            "detail": f"{pii_count} item(s) vaulted",
+            "ms": int((time.monotonic() - t0) * 1000),
+        }
         t0 = time.monotonic()
         # Attachment text is scanned too: instructions hidden in a CSV are still instructions.
         flags = guardrails.scan(raw)
         if not flags:
-            flags = await _semantic_guard(raw)
+            flags = await _semantic_guard(safe_text)
         trace.append(
             {
                 "step": "guardrails",
@@ -182,7 +217,6 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
         ticket_match = None if flags else tickets.TICKET_ID.search(message)
         if flags:
             envelope = {"answer": guardrails.refusal(flags), "status": "REFUSED", "contracts": []}
-            pii_count = 0
             tokenized_answer = envelope["answer"]
         elif ticket_match and not _has_other_question(message, ticket_match.group(0)):
             # Ticket follow-ups are answered from the ticket record, never by a model.
@@ -197,19 +231,11 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
             trace.append(
                 {"step": "ticket_lookup", "detail": "found" if ticket else "not found", "ms": 0}
             )
-            pii_count = 0
             tokenized_answer = answer
         else:
-            t0 = time.monotonic()
-            safe_text, pii_count = await pii_vault.tokenize(session_id, raw)
-            vault = await pii_vault.load(session_id)
-            trace.append(
-                {
-                    "step": "pii_vault",
-                    "detail": f"{pii_count} item(s) vaulted",
-                    "ms": int((time.monotonic() - t0) * 1000),
-                }
-            )
+            trace.append(pii_step)
+            await _restore_history(session_id)
+            vault = await pii_vault.load(session_id)  # restoring may have vaulted more values
             content = types.Content(role="user", parts=[types.Part(text=safe_text), *parts])
             envelope = None
             async for event in runner.run_async(
@@ -225,10 +251,7 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
                 raise RuntimeError("master produced no envelope")
             tokenized_answer = envelope["answer"]
             vault = await pii_vault.load(session_id)  # tools may have vaulted customer details
-            envelope["answer"] = _redact_foreign_pii(
-                _clean_answer(pii_vault.detokenize(tokenized_answer, vault, customer=False)),
-                vault,
-            )
+            envelope["answer"] = _clean_answer(tokenized_answer)
             if ticket_match:
                 ticket = await tickets.get(ticket_match.group(0), session_id)
                 if ticket:
@@ -248,7 +271,9 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
             pii_vaulted=pii_count,
             latency_ms=int((time.monotonic() - started) * 1000),
         )
-        envelope = redact_obj(envelope)  # no key value can ride out in an answer or trace
+        # Output guardrail, on every branch: masked PII only, and no secret rides out.
+        envelope["answer"] = pii_vault.mask_text(envelope["answer"], vault)
+        envelope = redact_obj(envelope)
         # Stored with the tokenized message only; the vault is the single home of raw PII.
         await store.put_doc(
             "turns",
@@ -256,7 +281,7 @@ async def _turn(session_id: str, message: str, files: list[tuple[str, str, bytes
             {
                 **envelope,
                 "answer": tokenized_answer,
-                "message": message if flags else "[tokenized]",
+                "message": safe_text,
                 "created_at": store.now(),
             },
         )

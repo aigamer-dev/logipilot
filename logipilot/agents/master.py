@@ -19,7 +19,7 @@ from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event, EventActions
 from google.genai import types
 
-from logipilot.agents import tickets
+from logipilot.agents import confirmations, tickets
 from logipilot.agents.contracts import Contract
 from logipilot.agents.skills import registry
 from logipilot.agents.specialists import build_agents
@@ -46,6 +46,13 @@ ACTION_CLAIM = re.compile(
 )
 
 
+# What a confirmed contract keeps from intake when it resumes on the customer's "yes".
+INTAKE_FIELDS = {
+    "fragment", "category", "confidence", "severity", "hazmat", "action_requested",
+    "tracking_ids", "skus", "reference_ids", "claimed_value_usd", "evidence", "language",
+}  # fmt: skip
+
+
 def _merge_ids(found: list[str], text: str, pattern: re.Pattern) -> list[str]:
     ids = [i.upper() for i in found] + [m.upper() for m in pattern.findall(text)]
     return list(dict.fromkeys(ids))
@@ -66,6 +73,27 @@ class MasterOrchestrator(BaseAgent):
 
         t0 = time.monotonic()
         intents: list[dict] = []
+
+        # 0. A reply to "please confirm": run exactly the queued actions, or none of them.
+        pending = state.get("pending_confirmation")
+        state["pending_confirmation"] = None
+        state["confirmed_actions"] = []
+        if pending:
+            kind = confirmations.reply_kind(_user_text(ctx))
+            step("confirmation", f"customer replied {kind}", t0)
+            if kind == "no":
+                contract = Contract(**pending["contract"])
+                contract.advance("NEEDS_INPUT", "master", "customer declined the queued actions")
+                contract.answer = "Okay, I've cancelled that. Nothing was changed."
+                yield self._final(ctx, state, trace, contract.answer, "RELEASED", [contract])
+                return
+            if kind == "yes":
+                contract = Contract(**pending["contract"])
+                state["confirmed_actions"] = pending["actions"]
+                async for event in self._execute(ctx, contract, started, step):
+                    yield event
+                yield self._final(ctx, state, trace, contract.answer, contract.status, [contract])
+                return
 
         # 1. Decompose the message into intents.
         if not intents:
@@ -140,6 +168,9 @@ class MasterOrchestrator(BaseAgent):
                 state_delta={
                     "envelope": envelope,
                     "clarifications": state.get("clarifications", 0),
+                    "pending_confirmation": state.get("pending_confirmation"),
+                    "pending_actions": [],
+                    "confirmed_actions": [],
                     "turn_trace": [],
                 }
             ),
@@ -298,6 +329,7 @@ class MasterOrchestrator(BaseAgent):
         evidence: list[str] = []  # accumulated across attempts so repairs stay grounded
         while True:
             contract.attempts += 1
+            state["pending_actions"] = []
             contract.advance("EXECUTING", "specialist", f"attempt {contract.attempts}")
             t0 = time.monotonic()
             ok = False
@@ -306,7 +338,9 @@ class MasterOrchestrator(BaseAgent):
             ):
                 if event:
                     for resp in event.get_function_responses() or []:
-                        evidence.append(json.dumps(resp.response, default=str)[:3000])
+                        result = json.dumps(resp.response, default=str)[:3000]
+                        if result not in evidence:  # repeated lookups would crowd out actions
+                            evidence.append(result)
                     yield event
             for result in evidence:
                 for action_id in ACTION_ID.findall(result):
@@ -329,6 +363,18 @@ class MasterOrchestrator(BaseAgent):
                 return
             contract.answer = state.get("draft") or ""
             contract.advance("DRAFTED", "specialist")
+            if state.get("pending_actions"):
+                # The draft is ignored: the question is built from the queued calls themselves,
+                # so the customer confirms exactly what will run.
+                actions = state["pending_actions"]
+                state["pending_confirmation"] = {
+                    "contract": contract.model_dump(include=INTAKE_FIELDS),
+                    "actions": actions,
+                }
+                contract.answer = confirmations.question(actions)
+                contract.advance("NEEDS_INPUT", "master", "awaiting confirmation")
+                step("confirmation", f"{len(actions)} action(s) queued", t0)
+                return
             if not contract.actions and contract.answer.rstrip().endswith("?"):
                 # The specialist needs something from the customer; that is a question, not a
                 # failed answer, so it neither loops the verifier nor opens a human ticket.
@@ -341,7 +387,7 @@ class MasterOrchestrator(BaseAgent):
                 return
             step(
                 f"{contract.category}_specialist",
-                f"attempt {contract.attempts}, " f"{len(evidence)} tool result(s)",
+                f"attempt {contract.attempts}, {len(evidence)} tool result(s)",
                 t0,
             )
 
@@ -351,6 +397,11 @@ class MasterOrchestrator(BaseAgent):
             if contract.verification["passed"]:
                 contract.advance("VERIFIED", "verifier")
                 contract.advance("RELEASED", "master")
+                return
+            if contract.verification["needs_input"]:
+                # A grounded "I can't do this yet, please send X" is the right reply, not a
+                # failed one: wait for the customer instead of looping and opening a ticket.
+                contract.advance("NEEDS_INPUT", "verifier", "asked the customer for details")
                 return
             contract.advance("REPAIRED", "verifier", contract.verification["critique"])
             out_of_time = time.monotonic() - started > config.TURN_DEADLINE_S
@@ -385,21 +436,31 @@ class MasterOrchestrator(BaseAgent):
         )
 
     async def _verify(self, contract: Contract, evidence: list[str]) -> dict:
+        # Action results go first so the ids the reply quotes survive the length cap.
+        ordered = sorted(evidence, key=lambda e: not ACTION_ID.search(e))
         answers = await jev.ask(
             {
                 "intent": contract.fragment,
                 "reply": contract.answer,
-                "tool_evidence": "\n".join(evidence)[:8000],
+                "tool_evidence": "\n".join(ordered)[:12000],
             },
             {
-                "resolves": jev.noul("The reply directly addresses and resolves the intent"),
+                "resolves": jev.noul(
+                    "The reply handles the intent as far as the tool evidence allows: it performs "
+                    "the requested action and quotes its action id, or answers the question"
+                ),
+                "needs_input": jev.noul(
+                    "The tool evidence shows the request cannot be completed yet (missing, unknown "
+                    "or incomplete details), and the reply says so and asks the customer for the "
+                    "specific information needed to continue"
+                ),
                 "grounded": jev.noul(
                     "Every status, date, amount and action id in the reply appears in the tool "
                     "evidence (or the reply makes no such claims)"
                 ),
                 "policy_ok": jev.noul(
                     "The reply follows policy: no refunds promised beyond declared value, no "
-                    "rerouting of hazardous goods, no other customers' data, no invented facts"
+                    "rerouting of hazardous goods, no other customers' data"
                 ),
             },
         )
@@ -430,7 +491,10 @@ class MasterOrchestrator(BaseAgent):
             if failed
             else ""
         )
-        return {**scores, "passed": not failed, "critique": critique}
+        needs_input = (
+            failed == ["resolves"] and float(answers["needs_input"].get("noul") or 0) >= 0.7
+        )
+        return {**scores, "passed": not failed, "needs_input": needs_input, "critique": critique}
 
     async def _run(self, key: str, ctx: InvocationContext):
         """Run one sub-agent with self-healing: MCP -> direct REST tools -> fallback model.

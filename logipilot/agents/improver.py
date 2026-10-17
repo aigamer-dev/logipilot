@@ -40,7 +40,10 @@ async def _eval_score(category: str, extra_rule: str | None) -> float:
     try:
         scores = []
         for case in cases:
-            env = await engine.turn(f"eval-{case['id']}-{rule_id or 'base'}", case["message"], [])
+            sid = f"eval-{case['id']}-{rule_id or 'base'}"
+            env = await engine.turn(sid, case["message"], [])
+            if "Reply **yes** to proceed" in env["answer"]:  # evals confirm queued actions
+                env = await engine.turn(sid, "yes", [])
             ver = [c.get("verification") or {} for c in env["contracts"]]
             scores += [
                 (v.get("resolves", 0) + v.get("grounded", 0) + v.get("policy_ok", 0)) / 3

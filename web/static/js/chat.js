@@ -91,12 +91,12 @@ function detail(env){
  (env.contracts||[]).forEach(c=>{const k=el('div','k');k.append(el('strong',null,c.fragment));
   k.append(el('div','files',`${c.category} · Jev confidence ${(c.confidence*100).toFixed(0)}% · ${c.attempts} attempt${c.attempts===1?'':'s'} · ${c.status}`));
   const hist=c.history||[];if(hist.length)k.append(el('div','life',[hist[0].from,...hist.map(x=>x.to)].join(' → ')));
-  if(c.verification){const v=c.verification;k.append(el('div','files',`Verifier: resolves ${v.resolves}, grounded ${v.grounded}, policy ${v.policy_ok} · ${v.passed?'passed':'failed'}`))}
+  if(c.verification){const v=c.verification;k.append(el('div','files',`Verifier: resolves ${v.resolves}, grounded ${v.grounded}, policy ${v.policy_ok} · ${v.passed?'passed':v.needs_input?'needs your input':'failed'}`))}
   if((c.actions||[]).length){const ul=el('ul');c.actions.forEach(x=>ul.append(el('li',null,`${x.kind} (${x.action_id})`)));k.append(ul)}
   h.append(k)});
  const sec=(t,items)=>{if(!items.length)return;const w=el('div');w.append(el('h4',null,t));const ul=el('ul');items.forEach(i=>ul.append(i));w.append(ul);h.append(w)};
  sec('Trace',(env.trace||[]).map(x=>{const li=el('li',null,`${x.step}: ${x.detail} `);li.append(el('span','ms',x.ms+' ms'));return li}));
- sec('Self-healing incidents',(env.incidents||[]).map(x=>el('li',null,`${x.component}: ${x.error} → ${x.recovery}`)));
+ sec('Self-healing incidents',(env.incidents||[]).map(x=>el('li',null,`${x.component} → ${x.recovery}`)));
  sec('Guardrail flags',(env.guardrail_flags||[]).map(x=>el('li',null,x)));
  h.append(el('div','files',foot.join(' · ')));d.append(h);return d}
 /* health */

@@ -13,7 +13,7 @@ from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
 
-from logipilot.agents import pii_vault
+from logipilot.agents import confirmations, pii_vault
 from logipilot.agents.skills import registry
 from logipilot.common import config, healing, llm, store, tools_client
 
@@ -41,8 +41,27 @@ Copy ids exactly. Never invent ids or amounts. Greetings or capability questions
 with no ids. Personal data appears as tokens like [EMAIL_1]; keep tokens as they are."""
 
 
-async def _before_tool(tool, args: dict, tool_context) -> None:
-    """Swap PII tokens for real values right before a tool runs, so models never see them."""
+async def _before_tool(tool, args: dict, tool_context) -> dict | None:
+    """Queue unconfirmed write actions; otherwise swap PII tokens for real values right before the
+    tool runs, so models never see them."""
+    granted = tool_context.state.get("confirmed_actions") or []
+    # A confirmed run may report what it did without asking again.
+    follow_up = bool(granted) and tool.name == "notify_customer"
+    if (
+        tool.name not in READ_ONLY_TOOLS
+        and not follow_up
+        and not confirmations.is_granted(tool.name, args, granted)
+    ):
+        pending = list(tool_context.state.get("pending_actions") or [])
+        pending.append({"tool": tool.name, "args": dict(args)})  # still tokenized
+        tool_context.state["pending_actions"] = pending
+        return {
+            "status": "not_executed",
+            "reason": "queued until the customer confirms",
+            "instruction": "Queue every other action your playbook needs the same way (use a "
+            "placeholder such as <claim id> for ids you do not have yet), then stop. Never say "
+            "an action was done.",
+        }
     vault = tool_context.state.get("pii_vault") or {}
     if vault:
         args.update(pii_vault.detokenize(args, vault))
@@ -64,6 +83,15 @@ async def _after_tool(tool, args: dict, tool_context, tool_response: dict) -> di
             vault[token], reverse[value] = value, token
         return reverse[value]
 
+    def scrub(text: str) -> str:
+        # Free text (event notes, echoed arguments) can carry PII outside the known fields.
+        for kind, pattern in pii_vault.PATTERNS:
+            text = pattern.sub(
+                lambda m, k=kind: reverse.get(m.group(0)) or token_for(k.lower(), m.group(0)),
+                text,
+            )
+        return text
+
     def walk(node, in_customer: bool = False):
         if isinstance(node, dict):
             # Every string under a "customer" object (name included) is vaulted, plus contact
@@ -82,8 +110,8 @@ async def _after_tool(tool, args: dict, tool_context, tool_response: dict) -> di
             try:
                 return json.dumps(walk(json.loads(node)))
             except ValueError:
-                return node
-        return node
+                return scrub(node)
+        return scrub(node) if isinstance(node, str) else node
 
     cleaned = walk(tool_response)
     if len(vault) != len(tool_context.state.get("pii_vault") or {}):
@@ -93,10 +121,40 @@ async def _after_tool(tool, args: dict, tool_context, tool_response: dict) -> di
     return cleaned
 
 
+async def _before_model(callback_context, llm_request) -> None:
+    """Last line of the PII wall: nothing that reaches a model, history included, holds raw PII.
+
+    Upstream vaulting should already have caught everything; a hit here means a gap, so it is
+    replaced by its token (or [redacted]) and logged as an incident.
+    """
+    vault = callback_context.state.get("pii_vault") or {}
+    reverse = {v: k for k, v in vault.items()}
+    hits = 0
+
+    def scrub(text: str) -> str:
+        nonlocal hits
+        for _, pattern in pii_vault.PATTERNS:
+            text, n = pattern.subn(lambda m: reverse.get(m.group(0), "[redacted]"), text)
+            hits += n
+        return text
+
+    for content in llm_request.contents or []:
+        for part in content.parts or []:
+            if part.text:
+                part.text = scrub(part.text)
+    config = llm_request.config
+    if config and isinstance(config.system_instruction, str):
+        config.system_instruction = scrub(config.system_instruction)
+    if hits:
+        await healing.record("pii_wall", f"{hits} raw PII value(s) in a model request", "masked")
+
+
 async def _on_tool_error(tool, args: dict, tool_context, error: Exception) -> dict:
     """Turn a tool crash into data the specialist can reason about instead of a failed turn."""
-    await healing.record(f"tool:{tool.name}", error, "returned the error to the agent as data")
-    return {"error": f"{tool.name} failed: {error}. Do not retry more than once."}
+    # The error may echo detokenized arguments; the model and the log get tokens, not values.
+    detail = pii_vault.retokenize(str(error), tool_context.state.get("pii_vault") or {})
+    await healing.record(f"tool:{tool.name}", detail, "returned the error to the agent as data")
+    return {"error": f"{tool.name} failed: {detail}. Do not retry more than once."}
 
 
 def _tools(names: list[str], via_mcp: bool) -> list:
@@ -219,4 +277,6 @@ def build_agents(model_name: str, via_mcp: bool, read_only: bool = False) -> dic
             on_tool_error_callback=_on_tool_error,
             output_key="draft",
         )
+    for agent in agents.values():
+        agent.before_model_callback = _before_model
     return agents

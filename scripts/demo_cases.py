@@ -104,6 +104,8 @@ def main(base: str) -> int:
             env = client.post(
                 "/api/chat", data={"session_id": sid, "message": message}, files=uploads or None
             ).json()
+            if "Reply **yes** to proceed" in env.get("answer", ""):  # confirm queued actions
+                env = client.post("/api/chat", data={"session_id": sid, "message": "yes"}).json()
             status = env.get("status", f"HTTP error: {env}")
             ok = status in expected
             failures += not ok

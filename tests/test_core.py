@@ -184,3 +184,134 @@ def test_learning_loop_triggers_on_new_negatives_and_respects_min_gap(monkeypatc
     state["last_run_at"] = iso(timedelta(hours=2))
     feedback[:] = feedback[:1]  # one thumbs-down, last run 2 h ago: not yet due
     assert asyncio.run(improver._due()) is None
+
+
+def test_replies_show_masked_pii_never_real_values() -> None:
+    vault = {"[EMAIL_1]": "ravi.k@example.com", "[PHONE_1]": "+91 98765 43210"}
+    text = "Updates go to [EMAIL_1] and [PHONE_1]; also ravi.k@example.com"
+    out = pii_vault.mask_text(text, vault)
+    assert "ravi.k@example.com" not in out and "98765" not in out
+    assert out.count("r***@example.com") == 2 and "******3210" in out
+
+
+def test_free_text_pii_in_tool_results_is_vaulted(monkeypatch) -> None:
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from logipilot.agents import specialists
+
+    async def no_persist(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(specialists.store, "put_doc", no_persist)
+    ctx = SimpleNamespace(
+        state={"pii_vault": {"[EMAIL_1]": "ravi.k@example.com"}},
+        _invocation_context=SimpleNamespace(session=SimpleNamespace(id="test-session-2")),
+    )
+    response = {"sent_to": "ravi.k@example.com", "note": "courier called 9876501234"}
+    dumped = json.dumps(asyncio.run(specialists._after_tool(None, {}, ctx, response)))
+    assert "ravi.k@example.com" not in dumped and "9876501234" not in dumped
+    assert "[EMAIL_1]" in dumped and "[CUST_PHONE_1]" in dumped
+
+
+def _verify_with(monkeypatch, noul: dict[str, float]) -> dict:
+    import asyncio
+
+    from logipilot.agents import master
+
+    async def fake_ask(_state, questions):
+        return {k: {"noul": noul[k]} for k in questions}
+
+    monkeypatch.setattr(master.jev, "ask", fake_ask)
+    contract = Contract(fragment="Dispute the double charge on LP1001")
+    contract.answer = "There are no invoices on LP1001. Please send the invoice number."
+    return asyncio.run(master.MasterOrchestrator._verify(None, contract, []))
+
+
+def test_verifier_treats_grounded_request_for_details_as_needs_input(monkeypatch) -> None:
+    v = _verify_with(
+        monkeypatch, {"resolves": 0.15, "needs_input": 0.9, "grounded": 0.9, "policy_ok": 0.95}
+    )
+    assert not v["passed"] and v["needs_input"]
+
+
+def test_verifier_still_fails_ungrounded_requests_for_details(monkeypatch) -> None:
+    v = _verify_with(
+        monkeypatch, {"resolves": 0.15, "needs_input": 0.9, "grounded": 0.2, "policy_ok": 0.95}
+    )
+    assert not v["passed"] and not v["needs_input"]
+
+
+def test_street_address_is_vaulted_and_masked(monkeypatch) -> None:
+    import asyncio
+
+    async def no_store(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(pii_vault.store, "get_doc", no_store)
+    monkeypatch.setattr(pii_vault.store, "put_doc", no_store)
+    text, added = asyncio.run(
+        pii_vault.tokenize("t-addr", "Change LP1007 to 12 MG Road, Bengaluru 560001")
+    )
+    assert added == 1 and "MG Road" not in text and "[ADDRESS_1], Bengaluru 560001" in text
+    masked = pii_vault.mask_text(text, {"[ADDRESS_1]": "12 MG Road"})
+    assert masked.startswith("Change LP1007 to *** Road")
+    # Ordinary logistics text is untouched.
+    assert asyncio.run(pii_vault.tokenize("t-addr", "2 days on the road, LP1001"))[1] == 0
+
+
+def test_history_restored_after_restart_is_tokenized(monkeypatch) -> None:
+    import asyncio
+
+    from logipilot.agents import engine
+
+    vault: dict = {}
+
+    async def list_docs(*_a, **_k):
+        return [
+            {"turn_id": "t1", "created_at": "1", "message": "Where is LP1001? call [PHONE_1]",
+             "answer": "LP1001 is at MAA."},
+            {"turn_id": "t2", "created_at": "2", "message": "[tokenized]",
+             "answer": "Staff: reach me at ops.lead@example.com"},
+        ]  # fmt: skip
+
+    async def get_doc(*_a, **_k):
+        return {"tokens": vault}
+
+    async def put_doc(_c, _id, data):
+        vault.update(data["tokens"])
+
+    monkeypatch.setattr(engine.store, "list_docs", list_docs)
+    monkeypatch.setattr(pii_vault.store, "get_doc", get_doc)
+    monkeypatch.setattr(pii_vault.store, "put_doc", put_doc)
+    asyncio.run(engine._restore_history("restore-test"))
+    session = asyncio.run(
+        engine.sessions.get_session(app_name=engine.APP, user_id="restore-test",
+                                    session_id="restore-test")
+    )  # fmt: skip
+    texts = [e.content.parts[0].text for e in session.events]
+    assert texts[0] == "Where is LP1001? call [PHONE_1]" and len(texts) == 3
+    assert "ops.lead@example.com" not in " ".join(texts) and "[EMAIL_1]" in texts[2]
+
+
+def test_model_requests_never_carry_raw_pii(monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from google.genai import types
+
+    from logipilot.agents import specialists
+
+    async def no_record(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(specialists.healing, "record", no_record)
+    ctx = SimpleNamespace(state={"pii_vault": {"[PHONE_1]": "7708833892"}})
+    req = SimpleNamespace(
+        contents=[types.Content(role="user", parts=[types.Part(text="call 7708833892 or a@b.io")])],
+        config=types.GenerateContentConfig(system_instruction="ship to 12 MG Road, Pune"),
+    )
+    asyncio.run(specialists._before_model(ctx, req))
+    assert req.contents[0].parts[0].text == "call [PHONE_1] or [redacted]"
+    assert "MG Road" not in req.config.system_instruction

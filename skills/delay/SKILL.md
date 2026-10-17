@@ -16,7 +16,7 @@ Find out why a shipment is late, quantify the slip against promised_date, and of
 3. `hub_weather` for the hubs on the route (origin, current, next) to confirm weather as a cause (storms, fog, flooding at e.g. MAA or BOM).
 4. Compute hours since last scan and projected arrival versus promised_date.
 5. If projected arrival is after promised_date, call `find_alternate_carriers` and keep only lanes that arrive within the promised window or clearly earlier than the current projection.
-6. Call `reroute_shipment` only if the customer explicitly asks for it OR the shipment has had no movement for more than 48h. Never reroute hazmat or temperature-controlled goods; escalate instead.
+6. Call `reroute_shipment` only if the customer explicitly asks for it. If the shipment has had no movement for more than 48h, offer the best lane in one sentence instead. Never reroute hazmat or temperature-controlled goods; escalate instead.
 7. `notify_customer` with the new ETA and any action taken.
 8. If the shipment is on time or the delay is under 12h, say so, take no action beyond a short notification if asked.
 9. If there has been no scan for more than 7 days, tell the customer it is being treated as a lost parcel and stop; the lost specialist owns that case.
