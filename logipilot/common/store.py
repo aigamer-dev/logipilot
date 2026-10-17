@@ -7,7 +7,20 @@ from google.cloud import firestore
 
 from logipilot.common import config  # noqa: F401  (loads .env before the client reads env vars)
 
-db = firestore.AsyncClient(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
+
+class _LazyClient:
+    """Creates the Firestore client on first use, so a missing credential surfaces as a clear
+    runtime error (and an unhealthy /api/health) instead of crashing the process at import."""
+
+    _client: firestore.AsyncClient | None = None
+
+    def __getattr__(self, name: str):
+        if self._client is None:
+            self._client = firestore.AsyncClient(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
+        return getattr(self._client, name)
+
+
+db = _LazyClient()
 
 
 def now() -> str:

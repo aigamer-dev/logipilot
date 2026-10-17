@@ -16,14 +16,19 @@ def _load_from_vault() -> None:
     """
     url, token = os.getenv("KEY_VAULT_URL"), os.getenv("KEY_VAULT_TOKEN")
     if not url or not token:
+        missing = [n for n, v in (("KEY_VAULT_URL", url), ("KEY_VAULT_TOKEN", token)) if not v]
+        print(f"[logipilot] key vault not used ({', '.join(missing)} not set); "
+              "using keys from the environment", flush=True)  # fmt: skip
         return
     import httpx
 
     resp = httpx.get(f"{url.rstrip('/')}/v1/keys", headers={"Authorization": f"Bearer {token}"},
                      timeout=10)  # fmt: skip
     resp.raise_for_status()
-    for key, value in resp.json().items():
+    keys = resp.json()
+    for key, value in keys.items():
         os.environ.setdefault(key, value)
+    print(f"[logipilot] loaded {len(keys)} keys from the vault", flush=True)
     sa_json = os.environ.get("GCP_SA_KEY_JSON")
     if sa_json and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         path = Path(tempfile.gettempdir()) / f"logipilot-sa-{os.getuid()}.json"
